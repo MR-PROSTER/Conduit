@@ -406,8 +406,12 @@ export class DraftRestoreController {
     }
 
     try {
+      let fullDraft = draftItem.draft.draft;
+      if (draftItem.draft.source === "remote") {
+        fullDraft = await this.wsClient.getDraft(draftItem.draft.draft.id);
+      }
       const draftManager = this.wsClient.getDraftManager();
-      const draftFiles = draftManager.readFilesFromDraft(draftItem.draft.draft);
+      const draftFiles = draftManager.readFilesFromDraft(fullDraft);
 
       const tempDir = vscode.Uri.joinPath(workspaceFolder.uri, ".conduit", "merge-temp");
       await vscode.workspace.fs.createDirectory(tempDir);
@@ -436,9 +440,9 @@ export class DraftRestoreController {
         }
 
         // Read base content
-        const baseCommit = draftItem.draft.draft.baseCommitHash;
+        const baseCommit = fullDraft.baseCommitHash;
         let baseContent = "";
-        if (baseCommit && baseCommit !== "HEAD") {
+        if (baseCommit) {
           try {
             const repoPath = this.wsClient.getRepoPath();
             const { stdout } = await execFileAsync("git", ["show", `${baseCommit}:${relativePath}`], { cwd: repoPath });
@@ -466,7 +470,7 @@ export class DraftRestoreController {
         const args = {
           base: baseTempUri,
           input1: { uri: localTempUri, title: "Current Workspace (Local)" },
-          input2: { uri: remoteTempUri, title: `Draft ${draftItem.draft.draft.id} (Remote)` },
+          input2: { uri: remoteTempUri, title: `Draft ${fullDraft.id} (Remote)` },
           output: fileUri
         };
 
@@ -479,7 +483,7 @@ export class DraftRestoreController {
       } else {
         void vscode.window.showInformationMessage(`Opened merge editor for ${mergeCount} files. Please resolve conflicts and save the files.`);
         // Mark draft as applied in the backend
-        await this.wsClient.restoreDraft(draftItem.draft.draft.id, "merge");
+        await this.wsClient.applyDraft(fullDraft.id);
       }
     } catch (error) {
       void vscode.window.showErrorMessage(`Failed to launch interactive merge: ${error instanceof Error ? error.message : String(error)}`);

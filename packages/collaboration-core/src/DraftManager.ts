@@ -495,6 +495,11 @@ export class DraftManager {
     await this.clearLocalFallback(draftId);
   }
 
+  public async applyDraft(draftId: string): Promise<void> {
+    await this.updateDraftStatus(draftId, "applied");
+    await this.clearLocalFallback(draftId);
+  }
+
   public async recoverLocalFallbacks(): Promise<readonly DraftMetadata[]> {
     await this.ensureDraftDirectories();
 

@@ -119,12 +119,12 @@
       "properties": {
         "conduit.websocketUrl": {
           "type": "string",
-          "default": "ws://localhost:4000/ws",
+          "default": "ws://conduitbackend-production-0901.up.railway.app/ws",
           "description": "WebSocket URL for conduit backend"
         },
         "conduit.backendUrl": {
           "type": "string",
-          "default": "http://localhost:4000",
+          "default": "https://conduitbackend-production-0901.up.railway.app",
           "description": "HTTP URL for conduit backend"
         }
       }

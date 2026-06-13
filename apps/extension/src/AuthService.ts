@@ -322,6 +322,19 @@ export class AuthService {
     }
   }
 
+  public async getDraft(
+    draftId: string,
+    accessToken: string
+  ): Promise<Draft> {
+    const payload = await this.fetchJson<{ readonly draft: Draft }>(
+      `/drafts/${encodeURIComponent(draftId)}`,
+      {
+        headers: this.authHeaders(accessToken)
+      }
+    );
+    return payload.draft;
+  }
+
   public async updateDraftStatus(
     draftId: string,
     status: Draft["status"],

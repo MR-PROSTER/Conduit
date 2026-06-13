@@ -510,6 +510,14 @@ export class SessionManager implements vscode.Disposable {
     this.syncDiscoveredDrafts(await draftManager.discoverDrafts());
   }
 
+  public async applyDraft(draftId: string): Promise<void> {
+    const draftManager = this.getDraftManager();
+    await draftManager.applyDraft(draftId);
+    await this.localFallbackStore.clearFallback(draftId);
+    await this.updateRemoteDraftStatus(draftId, "applied");
+    this.syncDiscoveredDrafts(await draftManager.discoverDrafts());
+  }
+
   public async restoreDraft(
     draftId: string,
     strategy: DraftRestoreStrategy
@@ -524,11 +532,23 @@ export class SessionManager implements vscode.Disposable {
       );
     }
 
+    let draftToRestore = draftMetadata.draft;
+    if (draftMetadata.source === "remote") {
+      if (!this.authService) {
+        throw new Error("AuthService is not initialized. Cannot retrieve remote draft.");
+      }
+      if (!session.accessToken) {
+        throw new Error("No active session access token available.");
+      }
+      const fullDraft = await this.authService.getDraft(draftId, session.accessToken);
+      draftToRestore = fullDraft;
+    }
+
     const restoreResult = await this.getDraftManager().restoreDraft({
       sessionKey: session.roomKey,
       ydoc: session.doc,
       fileManager: session.fileManager,
-      draft: draftMetadata.draft,
+      draft: draftToRestore,
       strategy,
       currentBranch: (await this.getCurrentBranch()) ?? "",
       currentHead: await session.gitService.getHead(),

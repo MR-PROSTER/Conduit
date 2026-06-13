@@ -31,6 +31,7 @@ import {
  */
 export class ConduitWebSocketClient implements vscode.Disposable {
   private readonly sessionManager: SessionManager;
+  private authService: any;
 
   public constructor(
     broadcastHub: BroadcastHub,
@@ -51,6 +52,7 @@ export class ConduitWebSocketClient implements vscode.Disposable {
   }
 
   public setAuthService(authService: any): void {
+    this.authService = authService;
     this.sessionManager.setAuthService(authService);
   }
 
@@ -138,6 +140,21 @@ export class ConduitWebSocketClient implements vscode.Disposable {
 
   public async discardDraft(draftId: string): Promise<void> {
     await this.sessionManager.discardDraft(draftId);
+  }
+
+  public async applyDraft(draftId: string): Promise<void> {
+    await this.sessionManager.applyDraft(draftId);
+  }
+
+  public async getDraft(draftId: string): Promise<Draft> {
+    if (!this.authService) {
+      throw new Error("AuthService is not initialized.");
+    }
+    const state = await this.authService.getState();
+    if (!state.accessToken) {
+      throw new Error("You must be signed in to retrieve drafts.");
+    }
+    return this.authService.getDraft(draftId, state.accessToken);
   }
 
   public async restoreDraft(
