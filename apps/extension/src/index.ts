@@ -6,4 +6,5 @@ export * from "./wsClient.js";
 export * from "./AuthService.js";
 export * from "./DraftRestoreController.js";
 export * from "./SessionManager.js";
+export * from "./SidebarProvider.js";
 export * from "./commands/index.js";
