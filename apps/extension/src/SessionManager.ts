@@ -294,10 +294,11 @@ export class SessionManager implements vscode.Disposable {
     }
 
     this.validateBranchName(branch);
+    const token = await this.getFreshToken() || session.accessToken;
     await this.branchSessionRegistry.discoverSessions(
       session.websocketUrl,
       session.room,
-      session.accessToken
+      token
     );
 
     const branchSession = this.branchSessionRegistry.getPreferredSession(
@@ -319,7 +320,7 @@ export class SessionManager implements vscode.Disposable {
       websocketUrl: session.websocketUrl,
       localUserId: session.localUserId,
       localUserName: session.localUserName,
-      ...(session.accessToken ? { accessToken: session.accessToken } : {})
+      ...(token ? { accessToken: token } : {})
     };
     const validatedTarget = await this.validateGitState(nextTarget);
     await this.connectYjs(validatedTarget);
@@ -537,10 +538,11 @@ export class SessionManager implements vscode.Disposable {
       if (!this.authService) {
         throw new Error("AuthService is not initialized. Cannot retrieve remote draft.");
       }
-      if (!session.accessToken) {
+      const token = await this.getFreshToken() || session.accessToken;
+      if (!token) {
         throw new Error("No active session access token available.");
       }
-      const fullDraft = await this.authService.getDraft(draftId, session.accessToken);
+      const fullDraft = await this.authService.getDraft(draftId, token);
       draftToRestore = fullDraft;
     }
 
@@ -752,9 +754,10 @@ export class SessionManager implements vscode.Disposable {
         : {})
     });
 
+    const token = await this.getFreshToken() || session.accessToken;
     const persistedDraft =
-      session.accessToken && this.remoteDraftSaver
-        ? await this.remoteDraftSaver(draft, session.accessToken)
+      token && this.remoteDraftSaver
+        ? await this.remoteDraftSaver(draft, token)
         : draft;
 
     this.branchSessionRegistry.upsertDraft({
@@ -772,7 +775,7 @@ export class SessionManager implements vscode.Disposable {
 
     this.broadcastHub.log(
       "info",
-      `Saved draft for session ${session.session.id}${session.accessToken && this.remoteDraftSaver
+      `Saved draft for session ${session.session.id}${token && this.remoteDraftSaver
         ? " to Supabase"
         : " locally"
       }`
@@ -824,7 +827,7 @@ export class SessionManager implements vscode.Disposable {
         reject(
           new Error(`Timed out waiting for Yjs sync for ${session.roomKey}`)
         );
-      }, 15_000);
+      }, 60_000);
 
       const handleSync = (isSynced: boolean): void => {
         if (!isSynced) {
@@ -890,6 +893,30 @@ export class SessionManager implements vscode.Disposable {
         ...(target.accessToken ? { token: target.accessToken } : {})
       }
     });
+
+    const originalConnect = provider.connect.bind(provider);
+    provider.connect = () => {
+      this.getFreshToken().then((token) => {
+        if (token) {
+          try {
+            const urlObj = new URL(provider.url);
+            urlObj.searchParams.set("token", token);
+            Object.defineProperty(provider, "url", {
+              value: urlObj.toString(),
+              configurable: true,
+              writable: true,
+              enumerable: true
+            });
+          } catch (error) {
+            this.broadcastHub.log("error", `[WS-CLIENT-DEBUG] Failed to update websocket token URL: ${error}`);
+          }
+        }
+        originalConnect();
+      }).catch((err) => {
+        this.broadcastHub.log("error", `[WS-CLIENT-DEBUG] Error getting fresh token before connect: ${err}`);
+        originalConnect();
+      });
+    };
 
     provider.on("status", (event: { status: string }) => {
       this.broadcastHub.log("info", `[WS-CLIENT-DEBUG] Provider status: ${event.status}`);
@@ -1285,7 +1312,12 @@ export class SessionManager implements vscode.Disposable {
     status: Draft["status"]
   ): Promise<void> {
     const session = this.activeSession;
-    if (!session?.accessToken || !this.remoteDraftStatusUpdater) {
+    if (!session || !this.remoteDraftStatusUpdater) {
+      return;
+    }
+
+    const token = await this.getFreshToken() || session.accessToken;
+    if (!token) {
       return;
     }
 
@@ -1293,7 +1325,7 @@ export class SessionManager implements vscode.Disposable {
       const updatedDraft = await this.remoteDraftStatusUpdater(
         draftId,
         status,
-        session.accessToken
+        token
       );
       this.branchSessionRegistry.upsertDraft({
         id: updatedDraft.id,
@@ -1317,7 +1349,12 @@ export class SessionManager implements vscode.Disposable {
 
   private async discoverRemoteDrafts(): Promise<readonly DraftMetadata[]> {
     const session = this.activeSession;
-    if (!session?.accessToken || !this.remoteDraftLister) {
+    if (!session || !this.remoteDraftLister) {
+      return [];
+    }
+
+    const token = await this.getFreshToken() || session.accessToken;
+    if (!token) {
       return [];
     }
 
@@ -1327,7 +1364,7 @@ export class SessionManager implements vscode.Disposable {
           roomId: session.room.id,
           status: "active"
         },
-        session.accessToken
+        token
       );
       return drafts.map((draft) => {
         return {
@@ -1827,6 +1864,18 @@ export class SessionManager implements vscode.Disposable {
     });
   }
 
+  private async getFreshToken(): Promise<string | undefined> {
+    if (!this.authService) {
+      return undefined;
+    }
+    try {
+      const state = await this.authService.getState();
+      return state.accessToken;
+    } catch {
+      return undefined;
+    }
+  }
+
   private updateState(nextState: WsClientState): void {
     this.state = nextState;
 
@@ -2131,8 +2180,9 @@ export class SessionManager implements vscode.Disposable {
       const headers: Record<string, string> = {
         "content-type": "application/json"
       };
-      if (session.accessToken) {
-        headers["authorization"] = `Bearer ${session.accessToken}`;
+      const token = await this.getFreshToken() || session.accessToken;
+      if (token) {
+        headers["authorization"] = `Bearer ${token}`;
       }
 
       // Upsert room first
@@ -2184,8 +2234,9 @@ export class SessionManager implements vscode.Disposable {
       const headers: Record<string, string> = {
         "content-type": "application/octet-stream"
       };
-      if (session.accessToken) {
-        headers["authorization"] = `Bearer ${session.accessToken}`;
+      const token = await this.getFreshToken() || session.accessToken;
+      if (token) {
+        headers["authorization"] = `Bearer ${token}`;
       }
 
       // The API stores the raw Yjs binary in the drafts bucket.
@@ -2253,8 +2304,9 @@ export class SessionManager implements vscode.Disposable {
       const backendUrl = this.getBackendHttpUrl(session.websocketUrl);
       const fetchUrl = `${backendUrl}/drafts?roomId=${encodeURIComponent(session.room.id)}`;
       const headers: Record<string, string> = {};
-      if (session.accessToken) {
-        headers["authorization"] = `Bearer ${session.accessToken}`;
+      const token = await this.getFreshToken() || session.accessToken;
+      if (token) {
+        headers["authorization"] = `Bearer ${token}`;
       }
 
       const response = await fetch(fetchUrl, { headers });
@@ -2267,29 +2319,31 @@ export class SessionManager implements vscode.Disposable {
         return;
       }
 
-      // The API returns an array of draft records. Each item includes at minimum
-      // the binary Yjs state plus metadata. We reconstruct a local Draft from it.
-      const payload = (await response.json()) as readonly ({
-        readonly roomId?: string;
-        readonly sessionId?: string;
-        readonly id?: string;
-        readonly branch?: string;
-        readonly baseCommitHash?: string;
-        readonly createdBy?: string;
-        readonly createdAt?: string;
-        readonly status?: string;
-        readonly lineage?: string;
-        // yjsState comes back as base64 string or the raw binary may be in a separate field
-        readonly yjsState?: string;
-        readonly filesystemOps?: readonly unknown[];
-        readonly aiEvents?: readonly unknown[];
-      })[];
+      // The API returns an object containing the drafts array: { drafts: [...] }
+      const data = (await response.json()) as {
+        readonly drafts?: readonly ({
+          readonly roomId?: string;
+          readonly sessionId?: string;
+          readonly id?: string;
+          readonly branch?: string;
+          readonly baseCommitHash?: string;
+          readonly createdBy?: string;
+          readonly createdAt?: string;
+          readonly status?: string;
+          readonly lineage?: string;
+          // yjsState comes back as base64 string or the raw binary may be in a separate field
+          readonly yjsState?: string;
+          readonly filesystemOps?: readonly unknown[];
+          readonly aiEvents?: readonly unknown[];
+        })[];
+      };
 
-      if (!Array.isArray(payload)) {
+      const drafts = data.drafts;
+      if (!Array.isArray(drafts)) {
         return;
       }
 
-      for (const remoteDraft of payload) {
+      for (const remoteDraft of drafts) {
         // Skip malformed entries
         if (
           typeof remoteDraft.roomId !== "string" ||
@@ -2353,7 +2407,7 @@ export class SessionManager implements vscode.Disposable {
 
       this.broadcastHub.log(
         "info",
-        `Fetched ${payload.length} remote draft(s) for room ${session.room.id}`
+        `Fetched ${drafts.length} remote draft(s) for room ${session.room.id}`
       );
     } catch (error) {
       this.broadcastHub.log(

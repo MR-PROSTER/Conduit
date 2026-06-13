@@ -59,6 +59,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
 
     private readonly disposables: vscode.Disposable[] = [];
     private view: vscode.WebviewView | undefined;
+    private cachedDrafts: readonly Draft[] = [];
+    private lastDraftsFetchTime = 0;
+    private draftsPromise: Promise<readonly Draft[]> | null = null;
 
     constructor(
         private readonly broadcastHub: BroadcastHub,
@@ -118,6 +121,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
     }
 
     private async handleMessage(message: SidebarMessage): Promise<void> {
+        this.lastDraftsFetchTime = 0; // Clear drafts cache on any user message
         switch (message.type) {
             case "signIn":
                 await vscode.commands.executeCommand("conduit.signIn");
@@ -255,15 +259,34 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
 
     private async loadDrafts(authed: boolean): Promise<readonly Draft[]> {
         if (!authed) {
+            this.cachedDrafts = [];
             return [];
         }
 
-        try {
-            const list = await this.wsClient.discoverDrafts();
-            return list.map(item => item.draft).filter(d => d.status === "active");
-        } catch {
-            return [];
+        const now = Date.now();
+        if (this.draftsPromise) {
+            return this.draftsPromise;
         }
+
+        if (now - this.lastDraftsFetchTime < 10000 && this.cachedDrafts.length > 0) {
+            return this.cachedDrafts;
+        }
+
+        this.draftsPromise = (async () => {
+            try {
+                const list = await this.wsClient.discoverDrafts();
+                const fetched = list.map(item => item.draft).filter(d => d.status === "active");
+                this.cachedDrafts = fetched;
+                this.lastDraftsFetchTime = Date.now();
+                return fetched;
+            } catch {
+                return this.cachedDrafts;
+            } finally {
+                this.draftsPromise = null;
+            }
+        })();
+
+        return this.draftsPromise;
     }
 
     private renderHtml(webview: vscode.Webview, state: SidebarState): string {

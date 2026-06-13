@@ -241,6 +241,57 @@ export function createRoomRouter(permissions: RoomPermissionService): Router {
     }
   });
 
+  // POST /rooms/:id/join → { room }
+  router.post("/rooms/:id/join", async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const roomId = req.params.id as string;
+
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error("Supabase client not initialized");
+      }
+
+      // Check if the room exists
+      const { data: roomData, error: roomError } = await supabase
+        .from("rooms")
+        .select("*")
+        .eq("id", roomId)
+        .maybeSingle();
+
+      if (roomError || !roomData) {
+        return res.status(404).json({ error: "Room not found" });
+      }
+
+      // Add user as active member of the room
+      const { error: memberError } = await supabase
+        .from("room_members")
+        .upsert(
+          {
+            room_id: roomId,
+            user_id: user.id,
+            role: "member",
+            status: "active",
+          },
+          { onConflict: "room_id,user_id" }
+        );
+
+      if (memberError) throw memberError;
+
+      const room: Room = {
+        id: roomData.id,
+        name: roomData.repository_name,
+        repoUrl: roomData.repository_remote_url || "",
+        defaultBranch: roomData.default_branch || "main",
+        ownerId: roomData.owner_id,
+      };
+
+      res.status(200).json({ room });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
   // POST /rooms/:id/invite { email } → { invitation }
   router.post("/rooms/:id/invite", async (req: Request, res: Response) => {
     try {

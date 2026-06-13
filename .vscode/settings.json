@@ -1,4 +1,4 @@
 {
-  "conduit.websocketUrl": "ws://conduitbackend-production-0901.up.railway.app/ws",
+  "conduit.websocketUrl": "wss://conduitbackend-production-0901.up.railway.app/ws",
   "conduit.backendUrl": "https://conduitbackend-production-0901.up.railway.app"
 }

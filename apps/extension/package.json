@@ -119,7 +119,7 @@
       "properties": {
         "conduit.websocketUrl": {
           "type": "string",
-          "default": "ws://conduitbackend-production-0901.up.railway.app/ws",
+          "default": "wss://conduitbackend-production-0901.up.railway.app/ws",
           "description": "WebSocket URL for conduit backend"
         },
         "conduit.backendUrl": {
