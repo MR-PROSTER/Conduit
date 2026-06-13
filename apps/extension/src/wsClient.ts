@@ -225,7 +225,7 @@ export class CodeSyncWebSocketClient {
         ws.on("close", (code, reason) => {
           clearInterval(pingInterval);
           this.broadcastHub.log("info", `Connection closed: ${code} - ${reason.toString()}`);
-          this.handleDisconnect();
+          this.handleDisconnect(true);
         });
       } catch (err) {
         reject(err);
@@ -233,7 +233,7 @@ export class CodeSyncWebSocketClient {
     });
   }
 
-  async disconnect(): Promise<void> {
+  async disconnect(saveDraft = true): Promise<void> {
     if (!this.ws) {
       return;
     }
@@ -245,7 +245,7 @@ export class CodeSyncWebSocketClient {
       ws.close();
     }
 
-    await this.handleDisconnect();
+    await this.handleDisconnect(saveDraft);
   }
 
   async leaveUnexpected(reason: string): Promise<void> {
@@ -293,7 +293,7 @@ export class CodeSyncWebSocketClient {
     });
   }
 
-  private async handleDisconnect(): Promise<void> {
+  private async handleDisconnect(saveDraft = true): Promise<void> {
     const session = this.activeSession;
     if (!session) {
       return;
@@ -318,31 +318,33 @@ export class CodeSyncWebSocketClient {
 
     this.activeSession = undefined;
 
-    try {
-      const encodedState = Buffer.from(Y.encodeStateAsUpdate(session.doc)).toString("base64");
-      const draft: Draft = {
-        id: crypto.randomUUID(),
-        sessionId: session.sessionId,
-        roomId: session.roomId,
-        branch: session.branch,
-        baseCommitHash: session.baseCommitHash || "",
-        yjsState: encodedState,
-        filesystemOps: [],
-        aiEvents: [],
-        createdBy: session.userId,
-        createdAt: new Date().toISOString(),
-        status: "active",
-      };
-
+    if (saveDraft) {
       try {
-        await this.saveDraftFn(draft);
-        this.broadcastHub.log("info", `Session saved as draft: ${draft.id}`);
+        const encodedState = Buffer.from(Y.encodeStateAsUpdate(session.doc)).toString("base64");
+        const draft: Draft = {
+          id: crypto.randomUUID(),
+          sessionId: session.sessionId,
+          roomId: session.roomId,
+          branch: session.branch,
+          baseCommitHash: session.baseCommitHash || "",
+          yjsState: encodedState,
+          filesystemOps: [],
+          aiEvents: [],
+          createdBy: session.userId,
+          createdAt: new Date().toISOString(),
+          status: "active",
+        };
+
+        try {
+          await this.saveDraftFn(draft);
+          this.broadcastHub.log("info", `Session saved as draft: ${draft.id}`);
+        } catch (err: any) {
+          this.broadcastHub.log("warn", `Failed to save draft to backend, falling back locally: ${err.message}`);
+          await this.localFallbackStore.save(draft.id, draft);
+        }
       } catch (err: any) {
-        this.broadcastHub.log("warn", `Failed to save draft to backend, falling back locally: ${err.message}`);
-        await this.localFallbackStore.save(draft.id, draft);
+        this.broadcastHub.log("error", `Failed to prepare/save session draft: ${err.message}`);
       }
-    } catch (err: any) {
-      this.broadcastHub.log("error", `Failed to prepare/save session draft: ${err.message}`);
     }
 
     this.broadcastHub.publishSnapshot({
