@@ -3,6 +3,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@codesync/collaboration-core": "workspace:*",
+    "@codesync/shared-types": "workspace:*",
+    "@supabase/supabase-js": "^2",
+    "dotenv": "^16",
+    "ws": "^8.18.0",
+    "y-websocket": "^2.0.4",
+    "yjs": "^13.6.31"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.19.2"
   }
 }
