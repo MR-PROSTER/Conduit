@@ -1,7 +1,15 @@
 {
-  "name": "@conduit/collaboration-core",
+  "name": "@codesync/collaboration-core",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@codesync/shared-types": "workspace:*",
+    "y-protocols": "*",
+    "y-websocket": "*",
+    "yjs": "*"
+  },
   "scripts": {
     "build": "tsc -b"
   }
