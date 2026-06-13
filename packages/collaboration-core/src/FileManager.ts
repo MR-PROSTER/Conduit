@@ -5,7 +5,7 @@ import * as Y from "yjs";
 
 import type { FilesystemEvent } from "@conduit/shared-types";
 
-const IGNORED_SEGMENTS = new Set(["node_modules", ".git", "dist", "build"]);
+const IGNORED_SEGMENTS = new Set(["node_modules", ".git", "dist", "build", ".conduit"]);
 const BINARY_EXTENSIONS = new Set([
   ".7z",
   ".a",
