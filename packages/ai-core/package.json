@@ -1,7 +1,15 @@
 {
-  "name": "@conduit/ai-core",
+  "name": "@codesync/ai-core",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@anthropic-ai/sdk": "*",
+    "@codesync/shared-types": "workspace:*",
+    "groq-sdk": "*",
+    "openai": "*"
+  },
   "scripts": {
     "build": "tsc -b"
   }
