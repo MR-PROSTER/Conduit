@@ -84,6 +84,28 @@ export const activate = async (
     );
     const draftRestoreController = new DraftRestoreController(wsClient);
 
+    const services: ExtensionServices = {
+        context,
+        branchSessionRegistry,
+        broadcastHub,
+        draftRestoreController,
+        sidebarProvider,
+        authService,
+        wsClient,
+        websocketUrl,
+        localUserId,
+        localUserName
+    };
+
+    const commandDisposables = registerCommands(services);
+
+    // Register commands before any slower startup work so a later failure does
+    // not leave the extension looking "unloaded" in the command palette.
+    const sidebarRegistration = vscode.window.registerWebviewViewProvider(
+        SidebarProvider.viewType,
+        sidebarProvider
+    );
+
     // ── Phase 5: AI Panel ──────────────────────────────────────────
     const apiKeyStore = new ApiKeyStore(context);
     const chatPanelProvider = new ChatPanelProvider(
@@ -99,25 +121,6 @@ export const activate = async (
         { webviewOptions: { retainContextWhenHidden: true } }
     );
 
-    const services: ExtensionServices = {
-        context,
-        branchSessionRegistry,
-        broadcastHub,
-        draftRestoreController,
-        sidebarProvider,
-        authService,
-        wsClient,
-        websocketUrl,
-        localUserId,
-        localUserName
-    };
-
-    const sidebarRegistration = vscode.window.registerWebviewViewProvider(
-        SidebarProvider.viewType,
-        sidebarProvider
-    );
-    const commandDisposables = registerCommands(services);
-
     extensionDisposable = vscode.Disposable.from(
         broadcastHub,
         wsClient,
@@ -130,7 +133,32 @@ export const activate = async (
 
     context.subscriptions.push(extensionDisposable);
 
+    void initializeStartup({
+        authService,
+        broadcastHub,
+        branchSessionRegistry,
+        draftRestoreController,
+        localUserName,
+        websocketUrl,
+        wsClient
+    }).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        broadcastHub.log("error", `Conduit startup failed: ${message}`);
+        console.error("[conduit-extension] Startup failed:", error);
+    });
+};
+
+const initializeStartup = async (services: {
+    readonly authService: AuthService;
+    readonly broadcastHub: BroadcastHub;
+    readonly branchSessionRegistry: BranchSessionRegistry;
+    readonly draftRestoreController: DraftRestoreController;
+    readonly localUserName: string;
+    readonly websocketUrl: string;
+    readonly wsClient: ConduitWebSocketClient;
+}): Promise<void> => {
     try {
+        const { authService, broadcastHub, draftRestoreController, localUserName, websocketUrl, wsClient } = services;
         await wsClient.recoverLocalFallbacks();
         let auth = await authService.getState();
         if (auth.accessToken && auth.user) {
@@ -179,15 +207,11 @@ export const activate = async (
             }
         }
     } catch (error) {
-        broadcastHub.log(
-            "warn",
-            `Failed to restore branch-scoped collaborative session: ${error instanceof Error ? error.message : String(error)
-            }`
-        );
+        throw error;
     }
 
-    void draftRestoreController.promptToRestoreUnresolvedDrafts();
-    broadcastHub.log("info", "Conduit extension activated");
+    void services.draftRestoreController.promptToRestoreUnresolvedDrafts();
+    services.broadcastHub.log("info", "Conduit extension activated");
 };
 
 /**
