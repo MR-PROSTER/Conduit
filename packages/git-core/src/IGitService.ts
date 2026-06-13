@@ -1,76 +1,74 @@
-import type { Room, Session } from "../../shared-types/src/index.js";
-
 export interface GitBranchReference {
-  name: string;
-  current: boolean;
-  remote: boolean;
+  readonly name: string;
+  readonly current: boolean;
+  readonly remote: boolean;
 }
 
 export interface GitRenamedPath {
-  from: string;
-  to: string;
+  readonly from: string;
+  readonly to: string;
 }
 
 export interface GitStatus {
-  branch: string;
-  head: string;
-  detached: boolean;
-  clean: boolean;
-  ahead: number;
-  behind: number;
-  staged: number;
-  modified: number;
-  deleted: number;
-  untracked: number;
-  conflicted: number;
-  renamed: number;
+  readonly branch: string | undefined;
+  readonly head: string;
+  readonly detached: boolean;
+  readonly clean: boolean;
+  readonly ahead: number;
+  readonly behind: number;
+  readonly staged: readonly string[];
+  readonly modified: readonly string[];
+  readonly deleted: readonly string[];
+  readonly untracked: readonly string[];
+  readonly conflicted: readonly string[];
+  readonly renamed: readonly GitRenamedPath[];
 }
 
 export interface GitCheckoutOptions {
-  create?: boolean;
-  force?: boolean;
-  allowDirty?: boolean;
+  readonly create?: boolean;
+  readonly force?: boolean;
+  readonly allowDirty?: boolean;
 }
 
 export interface GitCreateBranchOptions {
-  startPoint?: string;
-  checkout?: boolean;
-  force?: boolean;
+  readonly startPoint?: string;
+  readonly checkout?: boolean;
+  readonly force?: boolean;
 }
 
 export interface GitCommitOptions {
-  all?: boolean;
+  readonly all?: boolean;
 }
 
 export interface GitDiffOptions {
-  baseRef?: string;
-  targetRef?: string;
-  staged?: boolean;
-  paths?: readonly string[];
+  readonly baseRef?: string;
+  readonly targetRef?: string;
+  readonly staged?: boolean;
+  readonly paths?: readonly string[];
 }
 
 export interface GitCommitResult {
-  sha: string;
-  summary: string;
+  readonly sha: string;
+  readonly summary: string;
 }
 
 export interface GitCheckoutResult {
-  branch: string;
-  head: string;
-  detached: boolean;
+  readonly branch: string | undefined;
+  readonly head: string;
+  readonly detached: boolean;
 }
 
 export interface GitStashResult {
-  created: boolean;
-  stashRef: string;
-  message: string;
+  readonly created: boolean;
+  readonly stashRef: string | undefined;
+  readonly message: string;
 }
 
 export interface GitStashPopResult {
-  applied: boolean;
-  dropped: boolean;
-  conflicts: readonly string[];
-  output: string;
+  readonly applied: boolean;
+  readonly dropped: boolean;
+  readonly conflicts: boolean;
+  readonly output: string;
 }
 
 export interface IGitService {
@@ -89,5 +87,3 @@ export interface IGitService {
   commitCount(fromRef?: string, toRef?: string): Promise<number>;
   show(ref: string, relativePath: string): Promise<string>;
 }
-
-export type { Room, Session };

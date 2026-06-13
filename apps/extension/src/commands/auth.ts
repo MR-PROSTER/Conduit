@@ -1,62 +1,58 @@
 import * as vscode from "vscode";
-import type { ExtensionServices } from "./index.js";
 
-export function signInCommand(services: ExtensionServices): vscode.Disposable {
+import type { ExtensionServices } from "../extension.js";
+
+export const signInCommand = (
+  services: ExtensionServices
+): vscode.Disposable => {
   return vscode.commands.registerCommand("conduit.signIn", async () => {
     try {
-      const state = await services.authService.signIn();
-      const currentSnapshot = services.broadcastHub.getSnapshot();
-      services.broadcastHub.publishSnapshot({
-        ...currentSnapshot,
-        collaborators: state.user
-          ? [
-              {
-                userId: state.user.id,
-                name: state.user.name || "Me",
-                color: "#0000ff",
-                status: "online",
-              },
-            ]
-          : currentSnapshot.collaborators,
-      });
-      vscode.window.showInformationMessage(`Signed in successfully as ${state.user?.name || "user"}`);
-    } catch (err: any) {
-      vscode.window.showErrorMessage(`Sign in failed: ${err.message}`);
+      const user = await services.authService.signInWithGitHub();
+      void services.sidebarProvider.refresh();
+      vscode.window.showInformationMessage(
+        `Signed in to Conduit as ${user.email ?? user.id}.`
+      );
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Failed to sign in to Conduit: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   });
-}
+};
 
-export function signOutCommand(services: ExtensionServices): vscode.Disposable {
+export const signOutCommand = (
+  services: ExtensionServices
+): vscode.Disposable => {
   return vscode.commands.registerCommand("conduit.signOut", async () => {
-    try {
-      await services.authService.signOut();
-      await services.wsClient.disconnect(false);
-      vscode.window.showInformationMessage("Signed out successfully.");
-    } catch (err: any) {
-      vscode.window.showErrorMessage(`Sign out failed: ${err.message}`);
-    }
+    await services.authService.signOut();
+    await services.wsClient.disconnect();
+    void services.sidebarProvider.refresh();
+    vscode.window.showInformationMessage("Signed out of Conduit.");
   });
-}
+};
 
-export function showAccountCommand(services: ExtensionServices): vscode.Disposable {
+export const showAccountCommand = (
+  services: ExtensionServices
+): vscode.Disposable => {
   return vscode.commands.registerCommand("conduit.showAccount", async () => {
-    const state = services.authService.getState();
-    if (!state.accessToken || !state.user) {
-      vscode.window.showInformationMessage("Not signed in.");
-      return;
-    }
+    try {
+      const state = await services.authService.getState();
+      if (!state.accessToken || !state.user) {
+        vscode.window.showInformationMessage("Conduit: Not signed in.");
+        return;
+      }
 
-    const selection = await vscode.window.showQuickPick(
-      [
-        { label: `User: ${state.user.name || "No name"}` },
-        { label: `Email: ${state.user.email || "No email"}` },
-        { label: "Sign Out", description: "Sign out of your account" },
-      ],
-      { title: "Conduit Account Information" }
-    );
-
-    if (selection?.label === "Sign Out") {
-      await vscode.commands.executeCommand("conduit.signOut");
+      const user = await services.authService.refreshMe();
+      void services.sidebarProvider.refresh();
+      vscode.window.showInformationMessage(
+        `Conduit account: ${user.username || user.email || user.id}.`
+      );
+    } catch (err: any) {
+      vscode.window.showErrorMessage(
+        `Failed to retrieve account: ${err?.message || err || "Unknown error"}`
+      );
     }
   });
-}
+};

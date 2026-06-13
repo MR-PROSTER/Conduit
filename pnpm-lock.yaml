@@ -137,17 +137,20 @@ importers:
   packages/ai-core:
     dependencies:
       '@anthropic-ai/sdk':
-        specifier: '*'
-        version: 0.104.1
+        specifier: ^0.102.0
+        version: 0.102.0
       '@conduit/shared-types':
         specifier: workspace:*
         version: link:../shared-types
-      groq-sdk:
-        specifier: '*'
-        version: 1.2.1
       openai:
-        specifier: '*'
+        specifier: ^6.42.0
         version: 6.42.0(ws@8.21.0)
+      tree-sitter-wasms:
+        specifier: ^0.1.13
+        version: 0.1.13
+      web-tree-sitter:
+        specifier: ^0.26.9
+        version: 0.26.9
 
   packages/collaboration-core:
     dependencies:
@@ -155,14 +158,15 @@ importers:
         specifier: workspace:*
         version: link:../shared-types
       y-protocols:
-        specifier: '*'
+        specifier: ^1.0.6
         version: 1.0.7(yjs@13.6.31)
-      y-websocket:
-        specifier: '*'
-        version: 3.0.0(yjs@13.6.31)
       yjs:
-        specifier: '*'
+        specifier: ^13.6.27
         version: 13.6.31
+    devDependencies:
+      '@types/vscode':
+        specifier: ^1.99.1
+        version: 1.120.0
 
   packages/git-core:
     dependencies:
@@ -174,8 +178,8 @@ importers:
 
 packages:
 
-  '@anthropic-ai/sdk@0.104.1':
-    resolution: {integrity: sha512-gGACa/+IaiXzRRmF96aOhamoBgapKRBiFWbmmTFP8aMkpaEcuStF+Q61bjo4vPxBM7gqWJNZqsngslRdnLHv0Q==}
+  '@anthropic-ai/sdk@0.102.0':
+    resolution: {integrity: sha512-cThh3KcPW3lzkFyTz1cjyhJvOVw45NkLMoowO2ZJ/76CBz44ADUon+NsjEc/PypAkARs72Xu8qxTnx6PAOTQUQ==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -1034,10 +1038,6 @@ packages:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
 
-  groq-sdk@1.2.1:
-    resolution: {integrity: sha512-dsDSWJRJf+n2dPiCv7zU3IsJbrh7jfSPqi6vc1q0TTK1oUF6bn+wv4P2VFdynkHpuJ0TTJ57vlpT87judPgVPA==}
-    hasBin: true
-
   has-flag@4.0.0:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
     engines: {node: '>=8'}
@@ -1445,6 +1445,9 @@ packages:
     resolution: {integrity: sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==}
     engines: {node: '>=0.6'}
 
+  tree-sitter-wasms@0.1.13:
+    resolution: {integrity: sha512-wT+cR6DwaIz80/vho3AvSF0N4txuNx/5bcRKoXouOfClpxh/qqrF4URNLQXbbt8MaAxeksZcZd1j8gcGjc+QxQ==}
+
   ts-algebra@2.0.0:
     resolution: {integrity: sha512-FPAhNPFMrkwz76P7cdjdmiShwMynZYN6SgOujD1urY4oNm80Ou9oMdmbR45LotcKOXoy7wSmHkRFE6Mxbrhefw==}
 
@@ -1498,6 +1501,9 @@ packages:
   vary@1.1.2:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
+
+  web-tree-sitter@0.26.9:
+    resolution: {integrity: sha512-YJwSHANl6XFgeEjB8nitgj0qZYt5gkIesJ4w2srS2wcLB4GUa4xcOkM0YaMsU6WNR53YVIkDSY7Ej4pf3IXtCA==}
 
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
@@ -1560,12 +1566,6 @@ packages:
     peerDependencies:
       yjs: ^13.5.6
 
-  y-websocket@3.0.0:
-    resolution: {integrity: sha512-mUHy7AzkOZ834T/7piqtlA8Yk6AchqKqcrCXjKW8J1w2lPtRDjz8W5/CvXz9higKAHgKRKqpI3T33YkRFLkPtg==}
-    engines: {node: '>=16.0.0', npm: '>=8.0.0'}
-    peerDependencies:
-      yjs: ^13.5.6
-
   yjs@13.6.31:
     resolution: {integrity: sha512-Eq+5BRfbeGyqGVrTJL3bEcr8gKkxPuyuoHmAwpk52fDb8kOVMrfVSTRPd6yiGgX5Fskb96qCRjzjbRjrL4YEnw==}
     engines: {node: '>=16.0.0', npm: '>=8.0.0'}
@@ -1580,7 +1580,7 @@ packages:
 
 snapshots:
 
-  '@anthropic-ai/sdk@0.104.1':
+  '@anthropic-ai/sdk@0.102.0':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
@@ -2613,8 +2613,6 @@ snapshots:
 
   gopd@1.2.0: {}
 
-  groq-sdk@1.2.1: {}
-
   has-flag@4.0.0: {}
 
   has-symbols@1.1.0: {}
@@ -3011,6 +3009,8 @@ snapshots:
 
   toidentifier@1.0.1: {}
 
+  tree-sitter-wasms@0.1.13: {}
+
   ts-algebra@2.0.0: {}
 
   ts-api-utils@2.5.0(typescript@5.9.3):
@@ -3061,6 +3061,8 @@ snapshots:
 
   vary@1.1.2: {}
 
+  web-tree-sitter@0.26.9: {}
+
   which@2.0.2:
     dependencies:
       isexe: 2.0.0
@@ -3104,12 +3106,6 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
-
-  y-websocket@3.0.0(yjs@13.6.31):
-    dependencies:
-      lib0: 0.2.117
-      y-protocols: 1.0.7(yjs@13.6.31)
-      yjs: 13.6.31
 
   yjs@13.6.31:
     dependencies:

@@ -1,48 +1,57 @@
-import * as path from "node:path";
+import * as path from 'node:path';
+
+import type { Awareness } from 'y-protocols/awareness';
 
 export interface SafetyCheckResult {
   blocked: boolean;
-  peerName?: string;
+  peerName: string | undefined;
+  peerId: string | undefined;
 }
 
 /**
- * Tracks file-level write locks derived from peer awareness state.
- * The lock table is keyed by normalized file path and stores the peer name.
+ * Checks Yjs awareness states before an agent edit to prevent overwriting
+ * a teammate's live edits. This is an INTERNAL agent checkpoint — not a UI element.
+ * Called inside AgentTools.edit_file() before every write.
  */
 export class AgentSafetyLock {
-  private readonly lockTable = new Map<string, string>();
+  public constructor(private readonly awareness: Awareness) {}
 
-  check(filePath: string): SafetyCheckResult {
-    const peerName = this.lockTable.get(this.normalizePath(filePath));
-    if (!peerName) {
-      return { blocked: false };
-    }
+  /**
+   * Check if any peer is currently editing the given file.
+   * Returns blocked=true if a conflict is detected.
+   */
+  public check(filePath: string): SafetyCheckResult {
+    const normalizedTarget = this.normalizePath(filePath);
+    const states = this.awareness.getStates();
 
-    return {
-      blocked: true,
-      peerName,
-    };
-  }
+    for (const [clientId, state] of states) {
+      // Skip our own client
+      if (clientId === this.awareness.clientID) continue;
 
-  update(peerEdits: Map<string, string>): void {
-    this.lockTable.clear();
+      const activeFile = state['activeFile'] as string | undefined;
+      if (!activeFile) continue;
 
-    for (const [peerName, filePath] of peerEdits) {
-      const normalized = this.normalizePath(filePath);
-      if (!normalized) {
-        continue;
+      const normalizedPeer = this.normalizePath(activeFile);
+      if (normalizedPeer === normalizedTarget) {
+        return {
+          blocked: true,
+          peerName: (state['name'] as string | undefined) ?? 'A teammate',
+          peerId: String(clientId),
+        };
       }
-
-      this.lockTable.set(normalized, peerName);
     }
+
+    return { blocked: false, peerName: undefined, peerId: undefined };
   }
 
+  /**
+   * Normalize a file path for comparison.
+   * Strips leading ./ and converts to forward-slash lowercase form.
+   */
   private normalizePath(filePath: string): string {
-    return path
-      .normalize(filePath)
-      .replace(/\\/g, "/")
-      .replace(/^\.\//u, "")
-      .replace(/^\/+/, "")
+    return path.normalize(filePath)
+      .replace(/\\/g, '/')
+      .replace(/^\.\//u, '')
       .toLowerCase();
   }
 }

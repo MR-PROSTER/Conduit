@@ -6,6 +6,14 @@
     "target": "ES2022",
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@conduit/shared-types": ["packages/shared-types/src/index.ts"],
+      "@conduit/collaboration-core": ["packages/collaboration-core/src/index.ts"],
+      "@conduit/git-core": ["packages/git-core/src/index.ts"],
+      "@conduit/ai-core": ["packages/ai-core/src/index.ts"]
+    }
   }
 }

@@ -1,5 +1,7 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import type { ExecFileException, SpawnOptionsWithoutStdio } from "node:child_process";
 import { promisify } from "node:util";
+
 import type {
   GitBranchReference,
   GitCheckoutOptions,
@@ -8,210 +10,394 @@ import type {
   GitCommitResult,
   GitCreateBranchOptions,
   GitDiffOptions,
-  GitStatus,
+  GitRenamedPath,
   GitStashPopResult,
   GitStashResult,
-  IGitService,
+  GitStatus,
+  IGitService
 } from "./IGitService.js";
 
 const execFileAsync = promisify(execFile);
 
 export type GitServiceErrorCode =
-  | "NOT_A_GIT_REPO"
-  | "BRANCH_NOT_FOUND"
+  | "GIT_NOT_INSTALLED"
+  | "NOT_A_GIT_REPOSITORY"
+  | "REMOTE_NOT_FOUND"
   | "DIRTY_WORKING_TREE"
-  | "MERGE_CONFLICT"
-  | "COMMAND_FAILED";
+  | "DETACHED_HEAD"
+  | "INVALID_COMMIT"
+  | "EMPTY_COMMIT_MESSAGE"
+  | "GIT_COMMAND_FAILED";
 
 export class GitServiceError extends Error {
-  readonly code: GitServiceErrorCode;
-  readonly workspaceRoot: string;
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number | undefined;
+  public override readonly name = "GitServiceError";
 
-  constructor(
-    code: GitServiceErrorCode,
-    workspaceRoot: string,
-    message?: string,
-    details: { stdout?: string; stderr?: string; exitCode?: number } = {},
+  public constructor(
+    public readonly code: GitServiceErrorCode,
+    message: string,
+    public readonly details: {
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly exitCode?: number;
+      readonly stdout?: string;
+      readonly stderr?: string;
+      readonly cause?: unknown;
+    }
   ) {
-    super(message ?? `Git command failed in ${workspaceRoot}`);
-    this.name = "GitServiceError";
-    this.code = code;
-    this.workspaceRoot = workspaceRoot;
-    this.stdout = details.stdout ?? "";
-    this.stderr = details.stderr ?? "";
-    this.exitCode = details.exitCode;
+    super(message);
   }
 }
 
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-};
+export interface GitServiceOptions {
+  readonly repoPath: string;
+  readonly gitBinaryPath?: string;
+  readonly defaultRemoteName?: string;
+  readonly maxBufferBytes?: number;
+}
+
+interface GitCommandResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+interface ParsedBranchStatus {
+  readonly branch: string | undefined;
+  readonly detached: boolean;
+  readonly ahead: number;
+  readonly behind: number;
+}
 
 export class GitService implements IGitService {
-  constructor(private readonly workspaceRoot: string) {}
+  private readonly gitBinaryPath: string;
+  private readonly defaultRemoteName: string;
+  private readonly maxBufferBytes: number;
+  private repoValidated = false;
 
-  async getRepoRemoteUrl(remoteName = "origin"): Promise<string | undefined> {
+  public constructor(private readonly options: GitServiceOptions) {
+    this.gitBinaryPath = options.gitBinaryPath ?? "git";
+    this.defaultRemoteName = options.defaultRemoteName ?? "origin";
+    this.maxBufferBytes = options.maxBufferBytes ?? 4 * 1024 * 1024;
+  }
+
+  public async getRepoRemoteUrl(remoteName = this.defaultRemoteName): Promise<string | undefined> {
+    // We don't want to fail the entire operation just because the default remote is missing, so we return undefined in that case. Consumers can choose to treat this as an error if the remote is required for their use case.
+    await this.ensureRepository();
+
     try {
-      const { stdout } = await this.execGit(["remote", "get-url", remoteName]);
-      const url = stdout.trim();
-      return url.length > 0 ? url : undefined;
+      const result = await this.runGit(["remote", "get-url", remoteName]);
+      const remoteUrl = result.stdout.trim();
+      return remoteUrl.length > 0 ? remoteUrl : undefined;
     } catch (error) {
       if (this.isMissingRemoteError(error)) {
         return undefined;
       }
-      throw this.normalizeError(error);
+
+      throw error;
     }
   }
 
-  async getCurrentBranch(): Promise<GitCheckoutResult> {
-    const [branchOutput, head] = await Promise.all([
-      this.execGit(["rev-parse", "--abbrev-ref", "HEAD"]),
-      this.getHead(),
-    ]);
-    const branch = branchOutput.stdout.trim();
-    const detached = branch === "HEAD";
+  public async getCurrentBranch(): Promise<GitCheckoutResult> {
+    // We want to allow this operation to succeed even in a detached HEAD state, so we don't enforce repository cleanliness here. Consumers can call isAncestor or getHead if they need to verify the state of the repository.
+    await this.ensureRepository();
+
+    const branchResult = await this.runGit(["branch", "--show-current"]);
+    const head = await this.getHead();
+    const branch = branchResult.stdout.trim() || undefined;
+
     return {
       branch,
       head,
-      detached,
+      detached: branch === undefined
     };
   }
 
-  async getHead(): Promise<string> {
-    const { stdout } = await this.execGit(["rev-parse", "HEAD"]);
-    return stdout.trim();
+  public async getHead(): Promise<string> {
+    await this.ensureRepository();
+
+    const result = await this.runGit(["rev-parse", "HEAD"]);
+    const head = result.stdout.trim();
+    if (head.length === 0) {
+      throw new GitServiceError(
+        "INVALID_COMMIT",
+        "Git HEAD could not be resolved.",
+        {
+          command: this.gitBinaryPath,
+          args: ["rev-parse", "HEAD"],
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr
+        }
+      );
+    }
+
+    return head;
   }
 
-  async isAncestor(ancestor: string, descendant = "HEAD"): Promise<boolean> {
+  public async isAncestor(ancestor: string, descendant = "HEAD"): Promise<boolean> {
+    await this.ensureRepository();
+
     try {
-      await execFileAsync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
-        cwd: this.workspaceRoot,
-        encoding: "utf8",
-        windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024,
-      });
+      await this.runGit(["merge-base", "--is-ancestor", ancestor, descendant]);
       return true;
     } catch (error) {
-      if (this.getErrorStatus(error) === 1) {
+      if (
+        error instanceof GitServiceError &&
+        error.code === "GIT_COMMAND_FAILED" &&
+        error.details.exitCode === 1
+      ) {
         return false;
       }
-      throw this.normalizeError(error);
+
+      throw error;
     }
   }
 
-  async getStatus(): Promise<GitStatus> {
-    const [statusResult, head] = await Promise.all([
-      this.execGit(["status", "--porcelain=v2", "-b", "--untracked-files=all"]),
-      this.getHead(),
+  public async getStatus(): Promise<GitStatus> {
+    await this.ensureRepository();
+
+    const [statusResult, branchResult, head] = await Promise.all([
+      this.runGit(["status", "--porcelain=1", "--untracked-files=all"]),
+      this.runGit(["status", "--branch", "--porcelain=1", "--untracked-files=all"]),
+      this.getHead()
     ]);
 
-    const status = this.parseStatus(statusResult.stdout, head);
-    return status;
-  }
+    const statusLines = statusResult.stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.length > 0);
+    const branchStatus = this.parseBranchStatus(branchResult.stdout);
 
-  async listBranches(includeRemote = false): Promise<readonly GitBranchReference[]> {
-    const [local, remote] = await Promise.all([
-      this.execGit(["branch", "--format=%(refname:short)\t%(HEAD)"]),
-      includeRemote
-        ? this.execGit(["branch", "-r", "--format=%(refname:short)\t%(HEAD)"])
-        : Promise.resolve({ stdout: "", stderr: "" }),
-    ]);
+    const staged = new Set<string>();
+    const modified = new Set<string>();
+    const deleted = new Set<string>();
+    const untracked = new Set<string>();
+    const conflicted = new Set<string>();
+    const renamed: GitRenamedPath[] = [];
 
-    const branches: GitBranchReference[] = [];
-    branches.push(...this.parseBranches(local.stdout, false));
-    if (includeRemote) {
-      branches.push(...this.parseBranches(remote.stdout, true));
-    }
-    return branches;
-  }
-
-  async checkout(target: string, options: GitCheckoutOptions = {}): Promise<GitCheckoutResult> {
-    const { create = false, force = false, allowDirty = false } = options;
-
-    if (!force && !allowDirty) {
-      const status = await this.getStatus();
-      if (!status.clean) {
-        throw new GitServiceError(
-          "DIRTY_WORKING_TREE",
-          this.workspaceRoot,
-          "Working tree has uncommitted changes",
-        );
+    for (const line of statusLines) {
+      if (line.startsWith("##")) {
+        continue;
       }
+
+      const indexStatus = line.slice(0, 1);
+      const worktreeStatus = line.slice(1, 2);
+      const payload = line.slice(3);
+
+      if (indexStatus === "?" && worktreeStatus === "?") {
+        untracked.add(payload);
+        continue;
+      }
+
+      if (indexStatus === "R" || worktreeStatus === "R") {
+        const [from, to] = payload.split(" -> ");
+        if (from && to) {
+          renamed.push({ from, to });
+          staged.add(to);
+        }
+        continue;
+      }
+
+      if (indexStatus === "U" || worktreeStatus === "U" || `${indexStatus}${worktreeStatus}` === "AA" || `${indexStatus}${worktreeStatus}` === "DD") {
+        conflicted.add(payload);
+        continue;
+      }
+
+      if (indexStatus !== " " && indexStatus !== "?") {
+        if (indexStatus === "D") {
+          deleted.add(payload);
+        } else {
+          staged.add(payload);
+        }
+      }
+
+      if (worktreeStatus !== " ") {
+        if (worktreeStatus === "D") {
+          deleted.add(payload);
+        } else if (worktreeStatus === "M") {
+          modified.add(payload);
+        }
+      }
+    }
+
+    const clean =
+      staged.size === 0 &&
+      modified.size === 0 &&
+      deleted.size === 0 &&
+      untracked.size === 0 &&
+      conflicted.size === 0 &&
+      renamed.length === 0;
+
+    return {
+      branch: branchStatus.branch,
+      head,
+      detached: branchStatus.detached,
+      clean,
+      ahead: branchStatus.ahead,
+      behind: branchStatus.behind,
+      staged: [...staged],
+      modified: [...modified],
+      deleted: [...deleted],
+      untracked: [...untracked],
+      conflicted: [...conflicted],
+      renamed
+    };
+  }
+
+  public async listBranches(includeRemote = false): Promise<readonly GitBranchReference[]> {
+    await this.ensureRepository();
+
+    const args = includeRemote
+      ? ["branch", "--list", "--all", "--format=%(refname:short)|%(HEAD)"]
+      : ["branch", "--list", "--format=%(refname:short)|%(HEAD)"];
+    const result = await this.runGit(args);
+
+    return result.stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const separatorIndex = line.indexOf("|");
+        const name =
+          separatorIndex >= 0 ? line.slice(0, separatorIndex) : line;
+        const currentMarker =
+          separatorIndex >= 0 ? line.slice(separatorIndex + 1) : "";
+        return {
+          name,
+          current: currentMarker === "*",
+          remote: name.startsWith("remotes/")
+        };
+      });
+  }
+
+  public async checkout(
+    target: string,
+    options: GitCheckoutOptions = {}
+  ): Promise<GitCheckoutResult> {
+    await this.ensureRepository();
+
+    if (!options.allowDirty) {
+      await this.ensureCleanWorkingTree();
     }
 
     const args = ["checkout"];
-    if (force) {
-      args.push("-f");
+    if (options.force) {
+      args.push("--force");
     }
-    if (create) {
-      args.push(force ? "-B" : "-b", target);
-    } else {
-      args.push(target);
+    if (options.create) {
+      args.push("-b");
     }
+    args.push(target);
 
-    await this.execGit(args);
+    await this.runGit(args);
     return this.getCurrentBranch();
   }
 
-  async stash(message?: string): Promise<GitStashResult> {
-    const args = ["stash", "push"];
-    if (message) {
-      args.push("-m", message);
+  public async stash(message?: string): Promise<GitStashResult> {
+    await this.ensureRepository();
+
+    const status = await this.getStatus();
+    if (status.clean) {
+      return {
+        created: false,
+        stashRef: undefined,
+        message: "Working tree is already clean."
+      };
     }
 
-    const result = await this.execGit(args);
-    const output = `${result.stdout}${result.stderr}`.trim();
-    const created = !/no local changes to save/i.test(output) && !/nothing to stash/i.test(output);
+    const args = ["stash", "push", "--include-untracked"];
+    if (message && message.trim().length > 0) {
+      args.push("--message", message.trim());
+    }
+
+    const before = await this.getTopStashRef();
+    const result = await this.runGit(args);
+    const after = await this.getTopStashRef();
 
     return {
-      created,
-      stashRef: created ? "stash@{0}" : "",
-      message: message ?? "",
+      created: after !== before,
+      stashRef: after,
+      message: result.stdout.trim() || result.stderr.trim() || "Created stash."
     };
   }
 
-  async stashPop(stashRef = "stash@{0}"): Promise<GitStashPopResult> {
+  public async stashPop(stashRef = "stash@{0}"): Promise<GitStashPopResult> {
+    await this.ensureRepository();
+
     try {
-      const result = await this.execGit(["stash", "pop", stashRef]);
-      const output = `${result.stdout}${result.stderr}`.trim();
+      const result = await this.runGit(["stash", "pop", stashRef]);
+      const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
       return {
         applied: true,
-        dropped: true,
-        conflicts: [],
-        output,
+        dropped: !output.includes("The stash entry is kept"),
+        conflicts: output.includes("CONFLICT"),
+        output
       };
     } catch (error) {
-      const normalized = this.normalizeError(error);
-      const output = `${normalized.stdout}${normalized.stderr}`.trim();
-      if (normalized.code === "MERGE_CONFLICT") {
+      if (
+        error instanceof GitServiceError &&
+        error.code === "GIT_COMMAND_FAILED"
+      ) {
+        const output = [error.details.stdout, error.details.stderr].filter(Boolean).join("\n").trim();
         return {
-          applied: true,
+          applied: false,
           dropped: false,
-          conflicts: this.parseConflicts(output),
-          output,
+          conflicts: output.includes("CONFLICT"),
+          output
         };
       }
-      throw normalized;
+
+      throw error;
     }
   }
 
-  async commit(message: string, options: GitCommitOptions = {}): Promise<GitCommitResult> {
-    const args = ["commit", "-m", message];
+  public async commit(
+    message: string,
+    options: GitCommitOptions = {}
+  ): Promise<GitCommitResult> {
+    await this.ensureRepository();
+
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length === 0) {
+      throw new GitServiceError(
+        "EMPTY_COMMIT_MESSAGE",
+        "Commit message cannot be empty.",
+        {
+          command: this.gitBinaryPath,
+          args: ["commit", "--message", message]
+        }
+      );
+    }
+
+    const status = await this.getStatus();
+    if (status.clean) {
+      throw new GitServiceError(
+        "DIRTY_WORKING_TREE",
+        "Nothing to commit; the working tree is clean.",
+        {
+          command: this.gitBinaryPath,
+          args: ["commit", "--message", trimmedMessage]
+        }
+      );
+    }
+
+    const args = ["commit", "--message", trimmedMessage];
     if (options.all) {
-      args.splice(1, 0, "-a");
+      args.splice(1, 0, "--all");
     }
 
-    const { stdout } = await this.execGit(args);
-    const sha = this.extractCommitSha(stdout);
-    const summary = this.extractCommitSummary(stdout);
-    return { sha, summary };
+    const result = await this.runGit(args);
+    const sha = await this.getHead();
+
+    return {
+      sha,
+      summary: result.stdout.trim() || result.stderr.trim()
+    };
   }
 
-  async diff(options: GitDiffOptions = {}): Promise<string> {
+  public async diff(options: GitDiffOptions = {}): Promise<string> {
+    await this.ensureRepository();
+
     const args = ["diff"];
     if (options.staged) {
       args.push("--cached");
@@ -219,277 +405,338 @@ export class GitService implements IGitService {
     if (options.baseRef && options.targetRef) {
       args.push(`${options.baseRef}..${options.targetRef}`);
     } else if (options.baseRef) {
-      args.push(`${options.baseRef}..HEAD`);
-    } else if (options.targetRef) {
-      args.push(options.targetRef);
+      args.push(options.baseRef);
     }
-    if (options.paths?.length) {
+    if (options.paths && options.paths.length > 0) {
       args.push("--", ...options.paths);
     }
 
-    const { stdout } = await this.execGit(args);
-    return stdout;
+    return this.runGitStreaming(args);
   }
 
-  async createBranch(
+  public async createBranch(
     name: string,
-    options: GitCreateBranchOptions = {},
+    options: GitCreateBranchOptions = {}
   ): Promise<GitBranchReference> {
-    const { startPoint = "HEAD", checkout = true, force = false } = options;
-    const args = checkout ? ["checkout", force ? "-B" : "-b", name, startPoint] : ["branch"];
+    await this.ensureRepository();
 
-    if (!checkout) {
-      if (force) {
-        args.push("-f");
-      }
-      args.push(name, startPoint);
+    const args = ["branch"];
+    if (options.force) {
+      args.push("--force");
+    }
+    args.push(name);
+    if (options.startPoint) {
+      args.push(options.startPoint);
     }
 
-    await this.execGit(args);
-    const current = checkout ? (await this.getCurrentBranch()).branch === name : false;
+    await this.runGit(args);
+
+    if (options.checkout) {
+      await this.checkout(name, { allowDirty: true });
+    }
+
     return {
       name,
-      current,
-      remote: false,
+      current: options.checkout === true,
+      remote: false
     };
   }
 
-  async commitCount(fromRef?: string, toRef?: string): Promise<number> {
-    const args = ["rev-list", "--count"];
-    if (fromRef && toRef) {
-      args.push(`${fromRef}..${toRef}`);
-    } else if (fromRef) {
-      args.push(`${fromRef}..HEAD`);
-    } else if (toRef) {
-      args.push(toRef);
-    } else {
-      args.push("HEAD");
+  public async commitCount(fromRef?: string, toRef = "HEAD"): Promise<number> {
+    await this.ensureRepository();
+
+    const range = fromRef ? `${fromRef}..${toRef}` : toRef;
+    const result = await this.runGit(["rev-list", "--count", range]);
+    const count = Number.parseInt(result.stdout.trim(), 10);
+
+    if (Number.isNaN(count)) {
+      throw new GitServiceError(
+        "GIT_COMMAND_FAILED",
+        `Git returned a non-numeric commit count for range ${range}.`,
+        {
+          command: this.gitBinaryPath,
+          args: ["rev-list", "--count", range],
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr
+        }
+      );
     }
 
-    const { stdout } = await this.execGit(args);
-    return Number.parseInt(stdout.trim(), 10);
+    return count;
   }
 
-  async show(ref: string, relativePath: string): Promise<string> {
-    const { stdout } = await this.execGit(["show", `${ref}:${relativePath}`]);
-    return stdout;
-  }
-
-  private async execGit(args: string[]): Promise<ExecResult> {
+  public async show(ref: string, relativePath: string): Promise<string> {
+    await this.ensureRepository();
     try {
-      const result = (await execFileAsync("git", args, {
-        cwd: this.workspaceRoot,
-        encoding: "utf8",
-        windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024,
-      })) as ExecResult;
-      return result;
-    } catch (error) {
-      throw this.normalizeError(error);
+      const result = await this.runGit(["show", `${ref}:${relativePath}`]);
+      return result.stdout;
+    } catch {
+      // If the file does not exist at that ref, return an empty string.
+      return "";
     }
   }
 
-  private normalizeError(error: unknown): GitServiceError {
-    if (error instanceof GitServiceError) {
-      return error;
+  private async ensureRepository(): Promise<void> {
+    if (this.repoValidated) {
+      return;
     }
 
-    const stdout = this.getErrorOutput(error, "stdout");
-    const stderr = this.getErrorOutput(error, "stderr");
-    const exitCode = this.getErrorStatus(error);
-    const message =
-      `${stderr || stdout || (error instanceof Error ? error.message : "Git command failed")}`.trim();
+    try {
+      const result = await this.runGit(["rev-parse", "--is-inside-work-tree"], {
+        skipRepositoryCheck: true
+      });
+      if (result.stdout.trim() !== "true") {
+        throw new GitServiceError(
+          "NOT_A_GIT_REPOSITORY",
+          `Path is not a Git repository: ${this.options.repoPath}`,
+          {
+            command: this.gitBinaryPath,
+            args: ["rev-parse", "--is-inside-work-tree"],
+            exitCode: result.exitCode,
+            stdout: result.stdout,
+            stderr: result.stderr
+          }
+        );
+      }
 
-    if (this.isNotGitRepo(stderr, stdout)) {
-      return new GitServiceError("NOT_A_GIT_REPO", this.workspaceRoot, message, {
-        stdout,
-        stderr,
-        exitCode,
-      });
+      this.repoValidated = true;
+    } catch (error) {
+      if (error instanceof GitServiceError) {
+        throw error;
+      }
+
+      throw this.toGitServiceError(error, ["rev-parse", "--is-inside-work-tree"]);
     }
-    if (this.isDirtyWorkingTree(stderr, stdout)) {
-      return new GitServiceError("DIRTY_WORKING_TREE", this.workspaceRoot, message, {
-        stdout,
-        stderr,
-        exitCode,
-      });
-    }
-    if (this.isMergeConflict(stderr, stdout)) {
-      return new GitServiceError("MERGE_CONFLICT", this.workspaceRoot, message, {
-        stdout,
-        stderr,
-        exitCode,
-      });
-    }
-    if (this.isBranchNotFound(stderr, stdout)) {
-      return new GitServiceError("BRANCH_NOT_FOUND", this.workspaceRoot, message, {
-        stdout,
-        stderr,
-        exitCode,
-      });
+  }
+
+  private async ensureCleanWorkingTree(): Promise<void> {
+    const status = await this.getStatus();
+    if (status.clean) {
+      return;
     }
 
-    return new GitServiceError("COMMAND_FAILED", this.workspaceRoot, message, {
-      stdout,
-      stderr,
-      exitCode,
+    throw new GitServiceError(
+      "DIRTY_WORKING_TREE",
+      "Git operation requires a clean working tree.",
+      {
+        command: this.gitBinaryPath,
+        args: ["status", "--porcelain=1", "--untracked-files=all"],
+        stdout: JSON.stringify(status)
+      }
+    );
+  }
+
+  private parseBranchStatus(stdout: string): ParsedBranchStatus {
+    const firstLine = stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .find((line) => line.startsWith("##"));
+    if (!firstLine) {
+      return {
+        branch: undefined,
+        detached: true,
+        ahead: 0,
+        behind: 0
+      };
+    }
+
+    const header = firstLine.slice(2).trim();
+    const [branchPart, trackingPart] = header.split("...");
+    const branchName = branchPart === "HEAD (no branch)" ? undefined : branchPart;
+    const detached = branchName === undefined;
+
+    let ahead = 0;
+    let behind = 0;
+    if (trackingPart) {
+      const aheadMatch = trackingPart.match(/ahead (\d+)/u);
+      const behindMatch = trackingPart.match(/behind (\d+)/u);
+      ahead = Number.parseInt(aheadMatch?.[1] ?? "0", 10);
+      behind = Number.parseInt(behindMatch?.[1] ?? "0", 10);
+    }
+
+    return {
+      branch: branchName,
+      detached,
+      ahead,
+      behind
+    };
+  }
+
+  private async getTopStashRef(): Promise<string | undefined> {
+    try {
+      const result = await this.runGit(["stash", "list", "--format=%gd"]);
+      const firstLine = result.stdout.split(/\r?\n/u).find((line) => line.trim().length > 0);
+      return firstLine?.trim();
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async runGit(
+    args: readonly string[],
+    options: { readonly skipRepositoryCheck?: boolean } = {}
+  ): Promise<GitCommandResult> {
+    try {
+      const result = await execFileAsync(this.gitBinaryPath, [...args], {
+        cwd: this.options.repoPath,
+        maxBuffer: this.maxBufferBytes
+      });
+
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: 0
+      };
+    } catch (error) {
+      throw this.toGitServiceError(error, args, options.skipRepositoryCheck === true);
+    }
+  }
+
+  private runGitStreaming(args: readonly string[]): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      const spawnOptions: SpawnOptionsWithoutStdio = {
+        cwd: this.options.repoPath
+      };
+      const child = spawn(this.gitBinaryPath, [...args], spawnOptions);
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdoutChunks.push(chunk);
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderrChunks.push(chunk);
+      });
+      child.on("error", (error: unknown) => {
+        reject(this.toGitServiceError(error, args));
+      });
+      child.on("close", (code: number | null) => {
+        const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
+        if (code === 0) {
+          resolve(stdout);
+          return;
+        }
+
+        reject(
+          new GitServiceError(
+            "GIT_COMMAND_FAILED",
+            `Git command failed: ${this.formatCommand(args)}`,
+            this.buildErrorDetails(args, {
+              ...(code === null ? {} : { exitCode: code }),
+              stdout,
+              stderr
+            })
+          )
+        );
+      });
     });
   }
 
   private isMissingRemoteError(error: unknown): boolean {
-    const stdout = this.getErrorOutput(error, "stdout");
-    const stderr = this.getErrorOutput(error, "stderr");
-    return /unknown remote|no such remote/i.test(`${stdout}\n${stderr}`);
-  }
-
-  private isNotGitRepo(stderr: string, stdout: string): boolean {
-    return /not a git repository/i.test(`${stderr}\n${stdout}`);
-  }
-
-  private isDirtyWorkingTree(stderr: string, stdout: string): boolean {
-    return /would be overwritten by checkout|local changes to the following files would be overwritten|please commit your changes or stash them before you switch branches/i.test(
-      `${stderr}\n${stdout}`,
+    return (
+      error instanceof GitServiceError &&
+      error.code === "REMOTE_NOT_FOUND"
     );
   }
 
-  private isMergeConflict(stderr: string, stdout: string): boolean {
-    return /CONFLICT \(|merge conflict|conflicts in/i.test(`${stderr}\n${stdout}`);
-  }
+  private toGitServiceError(
+    error: unknown,
+    args: readonly string[],
+    skipRepositoryCheck = false
+  ): GitServiceError {
+    if (error instanceof GitServiceError) {
+      return error;
+    }
 
-  private isBranchNotFound(stderr: string, stdout: string): boolean {
-    return /did not match any file\(s\) known to git|unknown revision|ambiguous argument|branch .* not found|couldn't find remote ref/i.test(
-      `${stderr}\n${stdout}`,
+    const execError = error as ExecFileException & {
+      readonly stdout?: string;
+      readonly stderr?: string;
+      readonly code?: string | number;
+    };
+    const stderr = execError.stderr ?? "";
+    const stdout = execError.stdout ?? "";
+    const exitCode =
+      typeof execError.code === "number" ? execError.code : undefined;
+
+    if (execError.code === "ENOENT") {
+      return new GitServiceError(
+        "GIT_NOT_INSTALLED",
+        `Git binary not found: ${this.gitBinaryPath}`,
+        {
+          command: this.gitBinaryPath,
+          args,
+          cause: error
+        }
+      );
+    }
+
+    if (!skipRepositoryCheck && /not a git repository/i.test(stderr)) {
+      return new GitServiceError(
+        "NOT_A_GIT_REPOSITORY",
+        `Path is not a Git repository: ${this.options.repoPath}`,
+        this.buildErrorDetails(args, {
+          stdout,
+          stderr,
+          ...(exitCode === undefined ? {} : { exitCode }),
+          cause: error
+        })
+      );
+    }
+
+    if (/No such remote/i.test(stderr) || /No such remote/i.test(stdout)) {
+      return new GitServiceError(
+        "REMOTE_NOT_FOUND",
+        `Git remote does not exist.`,
+        this.buildErrorDetails(args, {
+          stdout,
+          stderr,
+          ...(exitCode === undefined ? {} : { exitCode }),
+          cause: error
+        })
+      );
+    }
+
+    return new GitServiceError(
+      "GIT_COMMAND_FAILED",
+      `Git command failed: ${this.formatCommand(args)}`,
+      this.buildErrorDetails(args, {
+        stdout,
+        stderr,
+        ...(exitCode === undefined ? {} : { exitCode }),
+        cause: error
+      })
     );
   }
 
-  private parseStatus(output: string, head: string): GitStatus {
-    const lines = output.split(/\r?\n/).filter((line) => line.length > 0);
-    const branchLine =
-      lines.find((line) => line.startsWith("# branch.head ")) ?? "# branch.head detached";
-    const branch = branchLine.slice("# branch.head ".length).trim();
-    const detached = branch === "detached";
+  private formatCommand(args: readonly string[]): string {
+    return [this.gitBinaryPath, ...args].join(" ");
+  }
 
-    const aheadBehindLine = lines.find((line) => line.startsWith("# branch.ab "));
-    let ahead = 0;
-    let behind = 0;
-    if (aheadBehindLine) {
-      const match = aheadBehindLine.match(/# branch\.ab \+(\d+) -(\d+)/);
-      if (match) {
-        ahead = Number.parseInt(match[1], 10);
-        behind = Number.parseInt(match[2], 10);
-      }
-    }
-
-    const entries = lines.filter((line) => !line.startsWith("#"));
-    const staged = entries.filter((line) => this.getStatusCode(line).staged).length;
-    const modified = entries.filter((line) => this.getStatusCode(line).modified).length;
-    const deleted = entries.filter((line) => this.getStatusCode(line).deleted).length;
-    const untracked = entries.filter((line) => line.startsWith("? ")).length;
-    const conflicted = entries.filter((line) => line.startsWith("u ")).length;
-    const renamed = entries.filter((line) => line.startsWith("2 ")).length;
-    const clean = entries.length === 0;
-
+  private buildErrorDetails(
+    args: readonly string[],
+    details: {
+      readonly exitCode?: number;
+      readonly stdout?: string;
+      readonly stderr?: string;
+      readonly cause?: unknown;
+    } = {}
+  ): {
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly exitCode?: number;
+    readonly stdout?: string;
+    readonly stderr?: string;
+    readonly cause?: unknown;
+  } {
     return {
-      branch,
-      head,
-      detached,
-      clean,
-      ahead,
-      behind,
-      staged,
-      modified,
-      deleted,
-      untracked,
-      conflicted,
-      renamed,
+      command: this.gitBinaryPath,
+      args,
+      ...(details.exitCode === undefined ? {} : { exitCode: details.exitCode }),
+      ...(details.stdout === undefined ? {} : { stdout: details.stdout }),
+      ...(details.stderr === undefined ? {} : { stderr: details.stderr }),
+      ...(details.cause === undefined ? {} : { cause: details.cause })
     };
-  }
-
-  private getStatusCode(line: string): { staged: boolean; modified: boolean; deleted: boolean } {
-    if (line.startsWith("1 ")) {
-      const code = line.slice(2, 4);
-      return {
-        staged: code[0] !== ".",
-        modified: code[1] !== ".",
-        deleted: code[0] === "D" || code[1] === "D",
-      };
-    }
-    if (line.startsWith("2 ")) {
-      const code = line.slice(2, 4);
-      return {
-        staged: code[0] !== ".",
-        modified: code[1] !== ".",
-        deleted: code[0] === "D" || code[1] === "D",
-      };
-    }
-    if (line.startsWith("u ")) {
-      return {
-        staged: true,
-        modified: true,
-        deleted: false,
-      };
-    }
-    return {
-      staged: false,
-      modified: false,
-      deleted: false,
-    };
-  }
-
-  private parseBranches(output: string, remote: boolean): GitBranchReference[] {
-    return output
-      .split(/\r?\n/)
-      .map((line) => line.trimEnd())
-      .filter((line) => line.length > 0)
-      .filter((line) => !line.includes("->"))
-      .map((line) => {
-        const [name, marker = " "] = line.split("\t");
-        return {
-          name,
-          current: marker.trim() === "*",
-          remote,
-        };
-      });
-  }
-
-  private parseConflicts(output: string): string[] {
-    const conflicts = new Set<string>();
-    for (const line of output.split(/\r?\n/)) {
-      const match = line.match(/CONFLICT \([^)]*\): Merge conflict in (.+)$/);
-      if (match) {
-        conflicts.add(match[1].trim());
-      }
-    }
-    return [...conflicts];
-  }
-
-  private extractCommitSha(stdout: string): string {
-    const match = stdout.match(/\[.* ([0-9a-f]{7,40})\]/i) ?? stdout.match(/([0-9a-f]{7,40})/i);
-    return match?.[1] ?? "";
-  }
-
-  private extractCommitSummary(stdout: string): string {
-    const summaryMatch = stdout.match(/\[\S+ [0-9a-f]{7,40}\] (.+)$/im);
-    return summaryMatch?.[1]?.trim() ?? stdout.trim();
-  }
-
-  private getErrorOutput(error: unknown, key: "stdout" | "stderr"): string {
-    if (typeof error === "object" && error !== null && key in error) {
-      const value = (error as Record<string, unknown>)[key];
-      if (typeof value === "string") {
-        return value;
-      }
-    }
-    return "";
-  }
-
-  private getErrorStatus(error: unknown): number | undefined {
-    if (typeof error === "object" && error !== null && "code" in error) {
-      const value = (error as Record<string, unknown>).code;
-      if (typeof value === "number") {
-        return value;
-      }
-    }
-    return undefined;
   }
 }

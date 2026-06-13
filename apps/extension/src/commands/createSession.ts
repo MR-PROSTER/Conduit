@@ -1,119 +1,104 @@
 import * as vscode from "vscode";
-import * as Y from "yjs";
-import type { ExtensionServices } from "./index.js";
+import * as crypto from "node:crypto";
+
 import type { Room, Session } from "@conduit/shared-types";
 
-export function createSessionCommand(services: ExtensionServices): vscode.Disposable {
-    return vscode.commands.registerCommand("conduit.createSession", async () => {
-        try {
-            const authState = services.authService.getState();
-            if (!authState.accessToken || !authState.user) {
-                throw new Error("You must be signed in to create a session.");
-            }
+import type { ExtensionServices } from "../extension.js";
+import { createSessionId } from "../sessionKeys.js";
 
-            const token = authState.accessToken;
-            const config = vscode.workspace.getConfiguration("conduit");
-            const backendUrl = config.get<string>("backendUrl") || "http://localhost:4000";
-
-            const branchInfo = await services.gitService.getCurrentBranch();
-            const headCommit = await services.gitService.getHead();
-
-            const roomsResponse = await fetch(`${backendUrl}/rooms`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            if (!roomsResponse.ok) {
-                throw new Error(`Failed to fetch rooms: ${roomsResponse.statusText}`);
-            }
-            const rooms = (await roomsResponse.json()) as Room[];
-
-            const roomItems = [
-                { label: "$(plus) Create new room...", value: "NEW" },
-                ...rooms.map((r) => ({ label: r.name, description: `ID: ${r.id}`, value: r })),
-            ];
-
-            const selectedOption = await vscode.window.showQuickPick(roomItems, {
-                title: "Select or Create a Room",
-                placeHolder: "Choose an option",
-            });
-
-            if (!selectedOption) {
-                return;
-            }
-
-            let room: Room;
-
-            if (selectedOption.value === "NEW") {
-                const roomName = await vscode.window.showInputBox({
-                    title: "Create New Room",
-                    prompt: "Enter room name",
-                    validateInput: (value) => (value.trim() ? null : "Room name cannot be empty"),
-                });
-
-                if (!roomName) {
-                    return;
-                }
-
-                const repoUrl = (await services.gitService.getRepoRemoteUrl()) || "";
-
-                const createRoomResponse = await fetch(`${backendUrl}/rooms`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({
-                        name: roomName,
-                        repoUrl,
-                        defaultBranch: branchInfo.branch,
-                    }),
-                });
-
-                if (!createRoomResponse.ok) {
-                    throw new Error(`Failed to create room: ${createRoomResponse.statusText}`);
-                }
-
-                room = (await createRoomResponse.json()) as Room;
-            } else {
-                room = selectedOption.value as Room;
-            }
-
-            const createSessionResponse = await fetch(`${backendUrl}/sessions`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                    roomId: room.id,
-                    branch: branchInfo.branch,
-                    baseCommitHash: headCommit,
-                }),
-            });
-
-            if (!createSessionResponse.ok) {
-                throw new Error(`Failed to create session: ${createSessionResponse.statusText}`);
-            }
-
-            const session = (await createSessionResponse.json()) as Session;
-
-            const websocketUrl = config.get<string>("websocketUrl") || "ws://localhost:4000";
-            const doc = new Y.Doc();
-
-            await services.wsClient.connect({
-                websocketUrl,
-                roomId: room.id,
-                branch: branchInfo.branch,
-                sessionId: session.id,
-                userId: authState.user.id,
-                doc,
-                baseCommitHash: headCommit,
-            });
-
-            vscode.window.showInformationMessage(`Collaboration session started in room '${room.name}'!`);
-        } catch (err: any) {
-            vscode.window.showErrorMessage(`Failed to create session: ${err.message}`);
-        }
+/**
+ * Prompts for session metadata and starts a new collaborative connection.
+ */
+export const createSessionCommand = (
+  services: ExtensionServices
+): vscode.Disposable => {
+  return vscode.commands.registerCommand("conduit.createSession", async () => {
+    const auth = await services.authService.requireState();
+    const roomIdInput = await vscode.window.showInputBox({
+      prompt: "Room Name / ID (Leave blank to generate a random room)",
+      placeHolder: "e.g., My Collaboration Room"
     });
-}
+    if (roomIdInput === undefined) {
+      return;
+    }
+
+    const isUuid = (val: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
+    const getDeterministicUuid = (input: string): string => {
+      const hash = crypto.createHash("sha256").update(input.trim().toLowerCase()).digest("hex");
+      return [
+        hash.slice(0, 8),
+        hash.slice(8, 12),
+        `4${hash.slice(13, 16)}`,
+        `8${hash.slice(17, 20)}`,
+        hash.slice(20, 32)
+      ].join("-");
+    };
+
+    const roomId = roomIdInput.trim().length === 0
+      ? crypto.randomUUID()
+      : (isUuid(roomIdInput) ? roomIdInput : getDeterministicUuid(roomIdInput));
+    const roomName = roomIdInput.trim().length > 0 ? roomIdInput : "New Room";
+
+    const currentBranch = await services.wsClient.getCurrentBranch();
+    const availableBranches = await services.wsClient.listBranches();
+    const branch =
+      (await vscode.window.showQuickPick(availableBranches, {
+        title: "Branch",
+        placeHolder: currentBranch ?? "Select a branch"
+      })) ??
+      (await vscode.window.showInputBox({
+        prompt: "Branch",
+        placeHolder: currentBranch ?? "main",
+        value: currentBranch ?? "main"
+      }));
+    if (!branch) {
+      return;
+    }
+
+    const sessionId = createSessionId();
+    const remoteUrl = await services.wsClient.getRepoRemoteUrl();
+    const room: Room = {
+      id: roomId,
+      name: roomName,
+      repoUrl:
+        remoteUrl ??
+        vscode.workspace.workspaceFolders?.[0]?.uri.toString() ??
+        "file://local-workspace",
+      defaultBranch: branch,
+      ownerId: auth.user.id
+    };
+    const session: Session = {
+      id: sessionId,
+      roomId,
+      branch,
+      baseCommitHash: "HEAD",
+      participants: [auth.user.id],
+      status: "active"
+    };
+
+    const backendRoom = await services.authService.createRoom(
+      room,
+      auth.accessToken
+    );
+    const backendSession = await services.authService.createSession(
+      session,
+      auth.accessToken
+    );
+
+    await services.wsClient.createSession({
+      room: backendRoom,
+      session: backendSession,
+      websocketUrl: services.websocketUrl,
+      localUserId: auth.user.id,
+      localUserName: auth.user.username || auth.user.email || services.localUserName,
+      accessToken: auth.accessToken
+    });
+
+    services.broadcastHub.log(
+      "info",
+      `Created collaborative session ${session.id} for branch ${branch}`
+    );
+  });
+};

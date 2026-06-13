@@ -1,16 +1,28 @@
 {
   "name": "@conduit/ai-core",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "dependencies": {
-    "@anthropic-ai/sdk": "*",
-    "@conduit/shared-types": "workspace:*",
-    "groq-sdk": "*",
-    "openai": "*"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0",
+    "@conduit/shared-types": "workspace:*",
+    "openai": "^6.42.0",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.26.9"
   }
 }
