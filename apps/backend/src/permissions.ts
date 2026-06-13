@@ -113,11 +113,35 @@ export class RoomPermissionService {
       console.error("[conduit-backend] assertActiveRoomAccess membership query error:", JSON.stringify(memberError));
     }
 
-    const role = member ? (member.role as "member" | "admin") : null;
-    const status = member ? (member.status as "active" | "banned") : null;
+    let role = member ? (member.role as "member" | "admin") : null;
+    let status = member ? (member.status as "active" | "banned") : null;
 
     if (!isOwner && (!member || status !== "active")) {
-      throw new PermissionError(403, "You do not have active access to this room");
+      if (status === "banned") {
+        throw new PermissionError(403, "You do not have active access to this room (banned)");
+      }
+
+      // Auto-join the user to the room since they possess the Room ID
+      console.log(`[conduit-backend] Auto-joining user ${userId} to room ${roomId}`);
+      const { error: joinError } = await this.supabase
+        .from("room_members")
+        .upsert(
+          {
+            room_id: roomId,
+            user_id: userId,
+            role: "member",
+            status: "active",
+          },
+          { onConflict: "room_id,user_id" }
+        );
+
+      if (joinError) {
+        console.error("[conduit-backend] Failed to auto-join user to room:", joinError);
+        throw new PermissionError(403, "You do not have active access to this room");
+      }
+
+      role = "member";
+      status = "active";
     }
 
     const mappedRoom: Room = {
