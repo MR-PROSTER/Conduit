@@ -1,5 +1,5 @@
 {
-  "name": "@codesync/shared-types",
+  "name": "@conduit/shared-types",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",

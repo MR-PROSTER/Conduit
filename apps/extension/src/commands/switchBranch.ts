@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import type { ExtensionServices } from "./index.js";
 
 export function switchBranchCommand(services: ExtensionServices): vscode.Disposable {
-  return vscode.commands.registerCommand("codesync.switchBranch", async () => {
+  return vscode.commands.registerCommand("conduit.switchBranch", async () => {
     try {
       const branches = await services.gitService.listBranches(false);
 

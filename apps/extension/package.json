@@ -1,23 +1,23 @@
 {
-  "name": "@codesync/extension",
+  "name": "@conduit/extension",
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "publisher": "codesync",
-  "main": "./dist/index.js",
+  "publisher": "conduit",
+  "main": "./dist/extension.js",
   "types": "./dist/index.d.ts",
   "engines": {
-    "vscode": "^1.99"
+    "vscode": "^1.85.0"
   },
   "scripts": {
     "build": "tsc -b",
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@codesync/ai-core": "workspace:*",
-    "@codesync/collaboration-core": "workspace:*",
-    "@codesync/git-core": "workspace:*",
-    "@codesync/shared-types": "workspace:*",
+    "@conduit/ai-core": "workspace:*",
+    "@conduit/collaboration-core": "workspace:*",
+    "@conduit/git-core": "workspace:*",
+    "@conduit/shared-types": "workspace:*",
     "diff": "*",
     "lib0": "*",
     "ws": "*",
@@ -26,92 +26,92 @@
     "yjs": "*"
   },
   "devDependencies": {
-    "@types/vscode": "^1.99.0",
+    "@types/vscode": "^1.85.0",
     "@types/ws": "^8.5.10"
   },
   "activationEvents": [
     "onStartupFinished",
-    "onCommand:codesync.signIn",
-    "onCommand:codesync.signOut",
-    "onCommand:codesync.showAccount",
-    "onCommand:codesync.createSession",
-    "onCommand:codesync.joinSession",
-    "onCommand:codesync.leaveSession",
-    "onCommand:codesync.restoreDrafts",
-    "onCommand:codesync.switchBranch",
-    "onView:codesync.sidebar",
-    "onView:codesync.aiPanel"
+    "onCommand:conduit.signIn",
+    "onCommand:conduit.signOut",
+    "onCommand:conduit.showAccount",
+    "onCommand:conduit.createSession",
+    "onCommand:conduit.joinSession",
+    "onCommand:conduit.leaveSession",
+    "onCommand:conduit.restoreDrafts",
+    "onCommand:conduit.switchBranch",
+    "onView:conduit.sidebar",
+    "onView:conduit.aiPanel"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "codesync.signIn",
-        "title": "CodeSync: Sign In"
+        "command": "conduit.signIn",
+        "title": "conduit: Sign In"
       },
       {
-        "command": "codesync.signOut",
-        "title": "CodeSync: Sign Out"
+        "command": "conduit.signOut",
+        "title": "conduit: Sign Out"
       },
       {
-        "command": "codesync.showAccount",
-        "title": "CodeSync: Show Account"
+        "command": "conduit.showAccount",
+        "title": "conduit: Show Account"
       },
       {
-        "command": "codesync.createSession",
-        "title": "CodeSync: Create Session"
+        "command": "conduit.createSession",
+        "title": "conduit: Create Session"
       },
       {
-        "command": "codesync.joinSession",
-        "title": "CodeSync: Join Session"
+        "command": "conduit.joinSession",
+        "title": "conduit: Join Session"
       },
       {
-        "command": "codesync.leaveSession",
-        "title": "CodeSync: Leave Session"
+        "command": "conduit.leaveSession",
+        "title": "conduit: Leave Session"
       },
       {
-        "command": "codesync.restoreDrafts",
-        "title": "CodeSync: Restore Drafts"
+        "command": "conduit.restoreDrafts",
+        "title": "conduit: Restore Drafts"
       },
       {
-        "command": "codesync.switchBranch",
-        "title": "CodeSync: Switch Branch"
+        "command": "conduit.switchBranch",
+        "title": "conduit: Switch Branch"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "codesync",
-          "title": "CodeSync",
+          "id": "conduit",
+          "title": "conduit",
           "icon": "$(sync)"
         }
       ]
     },
     "views": {
-      "codesync": [
+      "conduit": [
         {
           "type": "webview",
-          "id": "codesync.sidebar",
+          "id": "conduit.sidebar",
           "name": "Collaborators & Sessions"
         },
         {
           "type": "webview",
-          "id": "codesync.aiPanel",
+          "id": "conduit.aiPanel",
           "name": "AI Assistant"
         }
       ]
     },
     "configuration": {
-      "title": "CodeSync",
+      "title": "conduit",
       "properties": {
-        "codesync.websocketUrl": {
+        "conduit.websocketUrl": {
           "type": "string",
-          "default": "ws://localhost:3000",
-          "description": "WebSocket URL for CodeSync backend"
+          "default": "ws://localhost:4000/ws",
+          "description": "WebSocket URL for conduit backend"
         },
-        "codesync.backendUrl": {
+        "conduit.backendUrl": {
           "type": "string",
-          "default": "http://localhost:3000",
-          "description": "HTTP URL for CodeSync backend"
+          "default": "http://localhost:4000",
+          "description": "HTTP URL for conduit backend"
         }
       }
     }

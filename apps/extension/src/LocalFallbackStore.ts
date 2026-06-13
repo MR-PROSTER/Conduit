@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
-import type { Draft } from "@codesync/shared-types";
+import type { Draft } from "@conduit/shared-types";
 
 export class LocalFallbackStore {
   private readonly globalState: vscode.Memento;
-  private readonly keyPrefix = "codesync:fallback-draft:";
-  private readonly indexKey = "codesync:fallback-draft-ids";
+  private readonly keyPrefix = "conduit:fallback-draft:";
+  private readonly indexKey = "conduit:fallback-draft-ids";
 
   constructor(context: vscode.ExtensionContext) {
     this.globalState = context.globalState;

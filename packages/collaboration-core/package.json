@@ -1,11 +1,11 @@
 {
-  "name": "@codesync/collaboration-core",
+  "name": "@conduit/collaboration-core",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "@codesync/shared-types": "workspace:*",
+    "@conduit/shared-types": "workspace:*",
     "y-protocols": "*",
     "y-websocket": "*",
     "yjs": "*"

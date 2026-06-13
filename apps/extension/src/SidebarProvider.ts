@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
-import type { Draft } from "@codesync/shared-types";
+import type { Draft } from "@conduit/shared-types";
 import type {
   BroadcastHub,
   CollaborationSnapshot,
 } from "./broadcast.js";
 import type { BranchSessionRegistry, SessionDescriptor } from "./BranchSessionRegistry.js";
-import type { CodeSyncWebSocketClient } from "./wsClient.js";
+import type { ConduitWebSocketClient } from "./wsClient.js";
 import type { AuthService } from "./AuthService.js";
 
 interface SidebarState {
@@ -34,7 +34,7 @@ interface SidebarMessage {
 }
 
 export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Disposable {
-  public static readonly viewType = "codesync.sidebar";
+  public static readonly viewType = "conduit.sidebar";
 
   private readonly disposables: vscode.Disposable[] = [];
   private view: vscode.WebviewView | undefined;
@@ -42,7 +42,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
   constructor(
     private readonly broadcastHub: BroadcastHub,
     private readonly branchSessionRegistry: BranchSessionRegistry,
-    private readonly wsClient: CodeSyncWebSocketClient,
+    private readonly wsClient: ConduitWebSocketClient,
     private readonly websocketUrl: string,
     private readonly authService: AuthService,
     private readonly localUserId: string,
@@ -97,25 +97,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
   private async handleMessage(message: SidebarMessage): Promise<void> {
     switch (message.type) {
       case "signIn":
-        await vscode.commands.executeCommand("codesync.signIn");
+        await vscode.commands.executeCommand("conduit.signIn");
         break;
       case "signOut":
-        await vscode.commands.executeCommand("codesync.signOut");
+        await vscode.commands.executeCommand("conduit.signOut");
         break;
       case "createSession":
-        await vscode.commands.executeCommand("codesync.createSession");
+        await vscode.commands.executeCommand("conduit.createSession");
         break;
       case "joinSession":
-        await vscode.commands.executeCommand("codesync.joinSession");
+        await vscode.commands.executeCommand("conduit.joinSession");
         break;
       case "leaveSession":
-        await vscode.commands.executeCommand("codesync.leaveSession");
+        await vscode.commands.executeCommand("conduit.leaveSession");
         break;
       case "switchBranch":
-        await vscode.commands.executeCommand("codesync.switchBranch");
+        await vscode.commands.executeCommand("conduit.switchBranch");
         break;
       case "restoreDraft":
-        await vscode.commands.executeCommand("codesync.restoreDrafts");
+        await vscode.commands.executeCommand("conduit.restoreDrafts");
         break;
     }
 
@@ -388,7 +388,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
 <body>
   <div class="shell">
     <section class="hero">
-      <div class="kicker">CodeSync Sidebar</div>
+      <div class="kicker">Conduit Sidebar</div>
       <div class="title">
         <div>
           <h1>Sessions, collaborators, and drafts</h1>

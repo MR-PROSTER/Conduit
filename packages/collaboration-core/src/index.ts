@@ -1,5 +1,5 @@
-import type { Room, Session } from "@codesync/shared-types";
-export type { Draft, FilesystemEvent, Room, Session } from "@codesync/shared-types";
+import type { Room, Session } from "@conduit/shared-types";
+export type { Draft, FilesystemEvent, Room, Session } from "@conduit/shared-types";
 export { CursorManager } from "./CursorManager.js";
 export type {
   CursorManagerDeps,

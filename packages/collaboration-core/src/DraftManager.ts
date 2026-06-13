@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import * as Y from "yjs";
-import type { Draft, FilesystemEvent, Session } from "@codesync/shared-types";
+import type { Draft, FilesystemEvent, Session } from "@conduit/shared-types";
 import { FileManager } from "./FileManager.js";
 
 export interface DraftConflictResult {

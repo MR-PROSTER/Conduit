@@ -2,10 +2,10 @@ import * as vscode from "vscode";
 
 export type AIProviderName = "anthropic" | "openai" | "groq" | "ollama";
 
-const KEY_PREFIX = "codesync.ai.apiKey.";
-const MODEL_PREFIX = "codesync.ai.model.";
-const ACTIVE_PROVIDER_KEY = "codesync.ai.activeProvider";
-const OLLAMA_URL_KEY = "codesync.ai.ollamaUrl";
+const KEY_PREFIX = "conduit.ai.apiKey.";
+const MODEL_PREFIX = "conduit.ai.model.";
+const ACTIVE_PROVIDER_KEY = "conduit.ai.activeProvider";
+const OLLAMA_URL_KEY = "conduit.ai.ollamaUrl";
 
 export class ApiKeyStore {
   constructor(private readonly context: vscode.ExtensionContext) {}

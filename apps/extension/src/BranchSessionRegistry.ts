@@ -10,7 +10,7 @@ export interface SessionDescriptor {
 
 export class BranchSessionRegistry {
   private readonly workspaceState: vscode.Memento;
-  private readonly keyPrefix = "codesync:branch-session:";
+  private readonly keyPrefix = "conduit:branch-session:";
 
   constructor(context: vscode.ExtensionContext) {
     this.workspaceState = context.workspaceState;

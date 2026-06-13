@@ -7,7 +7,7 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
-import type { Draft, FilesystemEvent } from "@codesync/shared-types";
+import type { Draft, FilesystemEvent } from "@conduit/shared-types";
 import { getSupabaseClient } from "./supabaseClient.js";
 
 export type DraftRepositoryErrorCode =

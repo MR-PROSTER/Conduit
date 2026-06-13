@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import type { Room } from "@codesync/shared-types";
+import type { Room } from "@conduit/shared-types";
 import { RoomPermissionService } from "./permissions.js";
 import { getSupabaseClient } from "./supabaseClient.js";
 import { sendError, requireNonEmptyString } from "./authRoutes.js";

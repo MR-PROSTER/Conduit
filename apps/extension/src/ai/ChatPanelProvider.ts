@@ -1,11 +1,11 @@
 import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import * as Y from "yjs";
-import type { AgentStep, ChatMessage, ChatThread, ContextRef, FileDiff, SafetyBlock } from "@codesync/shared-types";
-import { LLMRouter, type ChatCompletionMessage, type ILLMProvider } from "@codesync/ai-core";
+import type { AgentStep, ChatMessage, ChatThread, ContextRef, FileDiff, SafetyBlock } from "@conduit/shared-types";
+import { LLMRouter, type ChatCompletionMessage, type ILLMProvider } from "@conduit/ai-core";
 import type { BroadcastHub, CollaborationSnapshot } from "../broadcast.js";
 import type { AuthService } from "../AuthService.js";
-import type { CodeSyncWebSocketClient } from "../wsClient.js";
+import type { ConduitWebSocketClient } from "../wsClient.js";
 import type { ApiKeyStore, AIProviderName } from "./ApiKeyStore.js";
 import { ContextAssembler } from "./ContextAssembler.js";
 import { IntentRouter } from "./IntentRouter.js";
@@ -16,554 +16,554 @@ import { AgentSafetyLock } from "../agent/AgentSafetyLock.js";
 import { AgentTools, type SafetyAction } from "../agent/AgentTools.js";
 
 type WebviewInbound =
-  | { type: "ready" }
-  | { type: "send"; content: string; threadId?: string; mode?: "chat" | "agent" }
-  | { type: "setProvider"; provider: AIProviderName; model?: string; ollamaUrl?: string }
-  | { type: "createThread"; name?: string }
-  | { type: "switchThread"; threadId: string }
-  | { type: "forkThread"; messageId: string; name?: string }
-  | { type: "loadHistory"; threadId?: string }
-  | { type: "approveEdit"; key?: string; messageId?: string; filePath?: string }
-  | { type: "rejectEdit"; key?: string; messageId?: string; filePath?: string };
+    | { type: "ready" }
+    | { type: "send"; content: string; threadId?: string; mode?: "chat" | "agent" }
+    | { type: "setProvider"; provider: AIProviderName; model?: string; ollamaUrl?: string }
+    | { type: "createThread"; name?: string }
+    | { type: "switchThread"; threadId: string }
+    | { type: "forkThread"; messageId: string; name?: string }
+    | { type: "loadHistory"; threadId?: string }
+    | { type: "approveEdit"; key?: string; messageId?: string; filePath?: string }
+    | { type: "rejectEdit"; key?: string; messageId?: string; filePath?: string };
 
 type StreamEvent =
-  | { type: "init"; state: PanelState }
-  | { type: "threadList"; threads: ChatThread[]; activeThreadId: string | null }
-  | { type: "messageAdded"; threadId: string; message: PanelMessage }
-  | { type: "messageChunk"; threadId: string; messageId: string; chunk: string }
-  | { type: "messageUpdated"; threadId: string; message: PanelMessage }
-  | { type: "providerStatus"; status: ProviderStatus }
-  | { type: "error"; message: string }
-  | { type: "safetyBlock"; key: string; block: SafetyBlock }
-  | { type: "step"; threadId: string; step: AgentStep };
+    | { type: "init"; state: PanelState }
+    | { type: "threadList"; threads: ChatThread[]; activeThreadId: string | null }
+    | { type: "messageAdded"; threadId: string; message: PanelMessage }
+    | { type: "messageChunk"; threadId: string; messageId: string; chunk: string }
+    | { type: "messageUpdated"; threadId: string; message: PanelMessage }
+    | { type: "providerStatus"; status: ProviderStatus }
+    | { type: "error"; message: string }
+    | { type: "safetyBlock"; key: string; block: SafetyBlock }
+    | { type: "step"; threadId: string; step: AgentStep };
 
 interface ProviderStatus {
-  activeProvider: AIProviderName;
-  activeModel: string;
-  hasKey: boolean;
-  ollamaUrl: string;
-  models: string[];
+    activeProvider: AIProviderName;
+    activeModel: string;
+    hasKey: boolean;
+    ollamaUrl: string;
+    models: string[];
 }
 
 interface PanelState {
-  snapshot: CollaborationSnapshot;
-  threads: ChatThread[];
-  activeThreadId: string | null;
-  messages: PanelMessage[];
-  providerStatus?: ProviderStatus;
-  contextRefs: ContextRef[];
+    snapshot: CollaborationSnapshot;
+    threads: ChatThread[];
+    activeThreadId: string | null;
+    messages: PanelMessage[];
+    providerStatus?: ProviderStatus;
+    contextRefs: ContextRef[];
 }
 
 interface PanelMessage extends ChatMessage {
-  model?: string;
-  tokensUsed?: number;
-  reviewed?: "approved" | "rejected";
+    model?: string;
+    tokensUsed?: number;
+    reviewed?: "approved" | "rejected";
 }
 
 interface PendingSafetyDecision {
-  resolve: (action: SafetyAction) => void;
-  block: SafetyBlock;
+    resolve: (action: SafetyAction) => void;
+    block: SafetyBlock;
 }
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider, vscode.Disposable {
-  public static readonly viewType = "codesync.aiPanel";
+    public static readonly viewType = "conduit.aiPanel";
 
-  private readonly disposables: vscode.Disposable[] = [];
-  private readonly router = new LLMRouter();
-  private readonly assembler = new ContextAssembler();
-  private readonly threadMessages = new Map<string, PanelMessage[]>();
-  private readonly pendingSafety = new Map<string, PendingSafetyDecision>();
-  private view: vscode.WebviewView | undefined;
-  private snapshot: CollaborationSnapshot = {
-    state: "disconnected",
-    participantCount: 0,
-    collaborators: [],
-  };
-  private threads: ChatThread[] = [];
-  private activeThreadId: string | null = null;
-  private providerStatus: ProviderStatus | undefined;
+    private readonly disposables: vscode.Disposable[] = [];
+    private readonly router = new LLMRouter();
+    private readonly assembler = new ContextAssembler();
+    private readonly threadMessages = new Map<string, PanelMessage[]>();
+    private readonly pendingSafety = new Map<string, PendingSafetyDecision>();
+    private view: vscode.WebviewView | undefined;
+    private snapshot: CollaborationSnapshot = {
+        state: "disconnected",
+        participantCount: 0,
+        collaborators: [],
+    };
+    private threads: ChatThread[] = [];
+    private activeThreadId: string | null = null;
+    private providerStatus: ProviderStatus | undefined;
 
-  constructor(
-    private readonly context: vscode.ExtensionContext,
-    private readonly broadcastHub: BroadcastHub,
-    private readonly authService: AuthService,
-    private readonly apiKeyStore: ApiKeyStore,
-    private readonly wsClient: CodeSyncWebSocketClient
-  ) {
-    this.disposables.push(
-      this.broadcastHub.onDidBroadcast((event) => {
-        if (event.type === "snapshot") {
-          this.snapshot = event.snapshot;
-          void this.refresh();
-        }
-      }),
-      this.authService.onDidAuthStateChange(() => {
+    constructor(
+        private readonly context: vscode.ExtensionContext,
+        private readonly broadcastHub: BroadcastHub,
+        private readonly authService: AuthService,
+        private readonly apiKeyStore: ApiKeyStore,
+        private readonly wsClient: ConduitWebSocketClient
+    ) {
+        this.disposables.push(
+            this.broadcastHub.onDidBroadcast((event) => {
+                if (event.type === "snapshot") {
+                    this.snapshot = event.snapshot;
+                    void this.refresh();
+                }
+            }),
+            this.authService.onDidAuthStateChange(() => {
+                void this.refreshProviderStatus();
+                void this.refresh();
+            })
+        );
+    }
+
+    resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        _context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken
+    ): void {
+        this.view = webviewView;
+        webviewView.webview.options = { enableScripts: true };
+        webviewView.webview.html = this.renderHtml(webviewView.webview);
+
+        this.disposables.push(
+            webviewView.webview.onDidReceiveMessage((message: WebviewInbound) => {
+                void this.handleMessage(message);
+            }),
+            webviewView.onDidDispose(() => {
+                this.view = undefined;
+            })
+        );
+
         void this.refreshProviderStatus();
-        void this.refresh();
-      })
-    );
-  }
-
-  resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
-  ): void {
-    this.view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = this.renderHtml(webviewView.webview);
-
-    this.disposables.push(
-      webviewView.webview.onDidReceiveMessage((message: WebviewInbound) => {
-        void this.handleMessage(message);
-      }),
-      webviewView.onDidDispose(() => {
-        this.view = undefined;
-      })
-    );
-
-    void this.refreshProviderStatus();
-    void this.loadInitialState();
-  }
-
-  dispose(): void {
-    for (const decision of this.pendingSafety.values()) {
-      decision.resolve("skip");
-    }
-    this.pendingSafety.clear();
-    vscode.Disposable.from(...this.disposables).dispose();
-  }
-
-  private async loadInitialState(): Promise<void> {
-    await this.loadThreads();
-    await this.refresh();
-  }
-
-  private async refresh(): Promise<void> {
-    const state = await this.buildState();
-    await this.view?.webview.postMessage({
-      type: "init",
-      state,
-    } satisfies StreamEvent);
-  }
-
-  private async refreshProviderStatus(): Promise<void> {
-    this.providerStatus = await this.buildProviderStatus();
-    await this.post({ type: "providerStatus", status: this.providerStatus } satisfies StreamEvent);
-  }
-
-  private async buildState(): Promise<PanelState> {
-    const activeThread = this.activeThreadId ? this.threads.find((thread) => thread.id === this.activeThreadId) : undefined;
-    const messages = this.activeThreadId ? this.threadMessages.get(this.activeThreadId) ?? [] : [];
-    const contextRefs: ContextRef[] = [];
-    if (activeThread) {
-      const refs = await this.collectContextRefs(activeThread.id);
-      contextRefs.push(...refs);
+        void this.loadInitialState();
     }
 
-    return {
-      snapshot: this.snapshot,
-      threads: this.threads,
-      activeThreadId: activeThread?.id ?? null,
-      messages,
-      providerStatus: this.providerStatus,
-      contextRefs,
-    };
-  }
+    dispose(): void {
+        for (const decision of this.pendingSafety.values()) {
+            decision.resolve("skip");
+        }
+        this.pendingSafety.clear();
+        vscode.Disposable.from(...this.disposables).dispose();
+    }
 
-  private async handleMessage(message: WebviewInbound): Promise<void> {
-    switch (message.type) {
-      case "ready":
+    private async loadInitialState(): Promise<void> {
+        await this.loadThreads();
         await this.refresh();
-        return;
-      case "setProvider":
-        await this.apiKeyStore.setActiveProvider(message.provider);
-        if (message.model) {
-          await this.apiKeyStore.setModel(message.provider, message.model);
+    }
+
+    private async refresh(): Promise<void> {
+        const state = await this.buildState();
+        await this.view?.webview.postMessage({
+            type: "init",
+            state,
+        } satisfies StreamEvent);
+    }
+
+    private async refreshProviderStatus(): Promise<void> {
+        this.providerStatus = await this.buildProviderStatus();
+        await this.post({ type: "providerStatus", status: this.providerStatus } satisfies StreamEvent);
+    }
+
+    private async buildState(): Promise<PanelState> {
+        const activeThread = this.activeThreadId ? this.threads.find((thread) => thread.id === this.activeThreadId) : undefined;
+        const messages = this.activeThreadId ? this.threadMessages.get(this.activeThreadId) ?? [] : [];
+        const contextRefs: ContextRef[] = [];
+        if (activeThread) {
+            const refs = await this.collectContextRefs(activeThread.id);
+            contextRefs.push(...refs);
         }
-        if (message.ollamaUrl) {
-          await this.apiKeyStore.setOllamaUrl(message.ollamaUrl);
+
+        return {
+            snapshot: this.snapshot,
+            threads: this.threads,
+            activeThreadId: activeThread?.id ?? null,
+            messages,
+            providerStatus: this.providerStatus,
+            contextRefs,
+        };
+    }
+
+    private async handleMessage(message: WebviewInbound): Promise<void> {
+        switch (message.type) {
+            case "ready":
+                await this.refresh();
+                return;
+            case "setProvider":
+                await this.apiKeyStore.setActiveProvider(message.provider);
+                if (message.model) {
+                    await this.apiKeyStore.setModel(message.provider, message.model);
+                }
+                if (message.ollamaUrl) {
+                    await this.apiKeyStore.setOllamaUrl(message.ollamaUrl);
+                }
+                await this.refreshProviderStatus();
+                return;
+            case "createThread":
+                await this.createThread(message.name);
+                return;
+            case "switchThread":
+                await this.switchThread(message.threadId);
+                return;
+            case "forkThread":
+                await this.forkThread(message.messageId, message.name);
+                return;
+            case "loadHistory":
+                await this.loadHistory(message.threadId ?? this.activeThreadId ?? undefined);
+                return;
+            case "approveEdit":
+                await this.resolveDecision(message.key, message.filePath, "approved");
+                return;
+            case "rejectEdit":
+                await this.resolveDecision(message.key, message.filePath, "rejected");
+                return;
+            case "send":
+                await this.sendMessage(message.content, message.threadId, message.mode);
+                return;
         }
-        await this.refreshProviderStatus();
-        return;
-      case "createThread":
-        await this.createThread(message.name);
-        return;
-      case "switchThread":
-        await this.switchThread(message.threadId);
-        return;
-      case "forkThread":
-        await this.forkThread(message.messageId, message.name);
-        return;
-      case "loadHistory":
-        await this.loadHistory(message.threadId ?? this.activeThreadId ?? undefined);
-        return;
-      case "approveEdit":
-        await this.resolveDecision(message.key, message.filePath, "approved");
-        return;
-      case "rejectEdit":
-        await this.resolveDecision(message.key, message.filePath, "rejected");
-        return;
-      case "send":
-        await this.sendMessage(message.content, message.threadId, message.mode);
-        return;
-    }
-  }
-
-  private async sendMessage(content: string, threadId?: string, mode?: "chat" | "agent"): Promise<void> {
-    const clean = content.trim();
-    if (!clean) {
-      return;
     }
 
-    const thread = await this.ensureThread(threadId);
-    const selectedMode = mode ?? IntentRouter.classifyIntent(clean);
-    const activeEditor = vscode.window.activeTextEditor;
-    const openFiles = vscode.workspace.textDocuments
-      .filter((doc) => !doc.isUntitled)
-      .map((doc) => vscode.workspace.asRelativePath(doc.uri, false));
-    const context = await this.assembler.assembleContext(
-      this.snapshot.session,
-      openFiles,
-      activeEditor,
-      this.snapshot.collaborators
-    );
-    const contextInfo: PromptContextInfo = {
-      workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-      session: this.snapshot.session,
-      openFiles,
-      activeFile: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri, false) : undefined,
-      cursorLine: activeEditor ? activeEditor.selection.active.line + 1 : undefined,
-      selection: activeEditor && !activeEditor.selection.isEmpty ? activeEditor.document.getText(activeEditor.selection) : undefined,
-      peers: this.snapshot.collaborators,
-      contextText: context.contextText,
-      contextRefs: context.contextRefs,
-    };
-
-    const userMessage = await this.appendMessage(thread.id, {
-      role: "user",
-      content: clean,
-      createdBy: this.getUserId(),
-      createdAt: new Date().toISOString(),
-      threadId: thread.id,
-    });
-
-    if (selectedMode === "agent") {
-      await this.runAgent(thread.id, userMessage, contextInfo);
-      return;
-    }
-
-    await this.runChat(thread.id, userMessage, contextInfo);
-  }
-
-  private async runChat(threadId: string, userMessage: PanelMessage, contextInfo: PromptContextInfo): Promise<void> {
-    const provider = await this.buildProvider();
-    const assistantId = crypto.randomUUID();
-    const systemPrompt = chatSystemPrompt(contextInfo);
-    const messages = this.toCompletionMessages(this.threadMessages.get(threadId) ?? []);
-    const stream = provider.streamChat(messages, { systemPrompt });
-
-    let content = "";
-    let totalTokens = 0;
-
-    for await (const chunk of stream) {
-      if (chunk.content) {
-        content += chunk.content;
-        await this.post({ type: "messageChunk", threadId, messageId: assistantId, chunk: chunk.content } satisfies StreamEvent);
-      }
-      if (typeof chunk.totalTokens === "number") {
-        totalTokens = chunk.totalTokens;
-      }
-    }
-
-    const assistantMessage = await this.appendMessage(threadId, {
-      role: "assistant",
-      content,
-      model: provider.modelId,
-      tokensUsed: totalTokens,
-      createdBy: this.getUserId(),
-      createdAt: new Date().toISOString(),
-      threadId,
-    });
-    await this.post({ type: "messageUpdated", threadId, message: assistantMessage } satisfies StreamEvent);
-  }
-
-  private async runAgent(threadId: string, userMessage: PanelMessage, contextInfo: PromptContextInfo): Promise<void> {
-    const provider = await this.buildProvider();
-    const safetyLock = new AgentSafetyLock();
-    const peerEdits = new Map<string, string>();
-    for (const peer of this.snapshot.collaborators) {
-      const activeFile = (peer as any).activeFile as string | undefined;
-      if (activeFile) {
-        peerEdits.set(peer.name, activeFile);
-      }
-    }
-    safetyLock.update(peerEdits);
-
-    const agentTools = new AgentTools(safetyLock, async (block) => {
-      const key = crypto.randomUUID();
-      return await new Promise<SafetyAction>((resolve) => {
-        this.pendingSafety.set(key, { resolve, block });
-        void this.post({ type: "safetyBlock", key, block } satisfies StreamEvent);
-      });
-    });
-
-    const memoryManager = new AgentMemoryManager();
-    const steps: AgentStep[] = [];
-    const executor = new AgentExecutor(provider, agentTools, memoryManager, (step) => {
-      steps.push(step);
-      void this.post({ type: "step", threadId, step } satisfies StreamEvent);
-    });
-
-    const initialMessages = [
-      {
-        role: "user" as const,
-        content: `${agentSystemPrompt(contextInfo)}\n\nWorkspace context:\n${contextInfo.contextText || "(none)"}\n\nTask:\n${userMessage.content}`,
-      },
-    ];
-
-    const result = await executor.run(userMessage.content, initialMessages);
-    const fileDiffs = steps
-      .filter((step) => Boolean(step.diff))
-      .map((step) => {
-        try {
-          return JSON.parse(step.diff ?? "null") as FileDiff;
-        } catch {
-          return null;
+    private async sendMessage(content: string, threadId?: string, mode?: "chat" | "agent"): Promise<void> {
+        const clean = content.trim();
+        if (!clean) {
+            return;
         }
-      })
-      .filter((diff): diff is FileDiff => Boolean(diff));
 
-    const agentMessage = await this.appendMessage(threadId, {
-      role: "agent",
-      content: result.content || "Agent completed the task.",
-      model: provider.modelId,
-      tokensUsed: result.totalTokens,
-      agentSteps: steps,
-      fileDiffs,
-      createdBy: this.getUserId(),
-      createdAt: new Date().toISOString(),
-      threadId,
-    });
-    await this.post({ type: "messageUpdated", threadId, message: agentMessage } satisfies StreamEvent);
-  }
+        const thread = await this.ensureThread(threadId);
+        const selectedMode = mode ?? IntentRouter.classifyIntent(clean);
+        const activeEditor = vscode.window.activeTextEditor;
+        const openFiles = vscode.workspace.textDocuments
+            .filter((doc) => !doc.isUntitled)
+            .map((doc) => vscode.workspace.asRelativePath(doc.uri, false));
+        const context = await this.assembler.assembleContext(
+            this.snapshot.session,
+            openFiles,
+            activeEditor,
+            this.snapshot.collaborators
+        );
+        const contextInfo: PromptContextInfo = {
+            workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+            session: this.snapshot.session,
+            openFiles,
+            activeFile: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri, false) : undefined,
+            cursorLine: activeEditor ? activeEditor.selection.active.line + 1 : undefined,
+            selection: activeEditor && !activeEditor.selection.isEmpty ? activeEditor.document.getText(activeEditor.selection) : undefined,
+            peers: this.snapshot.collaborators,
+            contextText: context.contextText,
+            contextRefs: context.contextRefs,
+        };
 
-  private async ensureThread(threadId?: string): Promise<ChatThread> {
-    if (threadId) {
-      const existing = this.threads.find((thread) => thread.id === threadId);
-      if (existing) {
+        const userMessage = await this.appendMessage(thread.id, {
+            role: "user",
+            content: clean,
+            createdBy: this.getUserId(),
+            createdAt: new Date().toISOString(),
+            threadId: thread.id,
+        });
+
+        if (selectedMode === "agent") {
+            await this.runAgent(thread.id, userMessage, contextInfo);
+            return;
+        }
+
+        await this.runChat(thread.id, userMessage, contextInfo);
+    }
+
+    private async runChat(threadId: string, userMessage: PanelMessage, contextInfo: PromptContextInfo): Promise<void> {
+        const provider = await this.buildProvider();
+        const assistantId = crypto.randomUUID();
+        const systemPrompt = chatSystemPrompt(contextInfo);
+        const messages = this.toCompletionMessages(this.threadMessages.get(threadId) ?? []);
+        const stream = provider.streamChat(messages, { systemPrompt });
+
+        let content = "";
+        let totalTokens = 0;
+
+        for await (const chunk of stream) {
+            if (chunk.content) {
+                content += chunk.content;
+                await this.post({ type: "messageChunk", threadId, messageId: assistantId, chunk: chunk.content } satisfies StreamEvent);
+            }
+            if (typeof chunk.totalTokens === "number") {
+                totalTokens = chunk.totalTokens;
+            }
+        }
+
+        const assistantMessage = await this.appendMessage(threadId, {
+            role: "assistant",
+            content,
+            model: provider.modelId,
+            tokensUsed: totalTokens,
+            createdBy: this.getUserId(),
+            createdAt: new Date().toISOString(),
+            threadId,
+        });
+        await this.post({ type: "messageUpdated", threadId, message: assistantMessage } satisfies StreamEvent);
+    }
+
+    private async runAgent(threadId: string, userMessage: PanelMessage, contextInfo: PromptContextInfo): Promise<void> {
+        const provider = await this.buildProvider();
+        const safetyLock = new AgentSafetyLock();
+        const peerEdits = new Map<string, string>();
+        for (const peer of this.snapshot.collaborators) {
+            const activeFile = (peer as any).activeFile as string | undefined;
+            if (activeFile) {
+                peerEdits.set(peer.name, activeFile);
+            }
+        }
+        safetyLock.update(peerEdits);
+
+        const agentTools = new AgentTools(safetyLock, async (block) => {
+            const key = crypto.randomUUID();
+            return await new Promise<SafetyAction>((resolve) => {
+                this.pendingSafety.set(key, { resolve, block });
+                void this.post({ type: "safetyBlock", key, block } satisfies StreamEvent);
+            });
+        });
+
+        const memoryManager = new AgentMemoryManager();
+        const steps: AgentStep[] = [];
+        const executor = new AgentExecutor(provider, agentTools, memoryManager, (step) => {
+            steps.push(step);
+            void this.post({ type: "step", threadId, step } satisfies StreamEvent);
+        });
+
+        const initialMessages = [
+            {
+                role: "user" as const,
+                content: `${agentSystemPrompt(contextInfo)}\n\nWorkspace context:\n${contextInfo.contextText || "(none)"}\n\nTask:\n${userMessage.content}`,
+            },
+        ];
+
+        const result = await executor.run(userMessage.content, initialMessages);
+        const fileDiffs = steps
+            .filter((step) => Boolean(step.diff))
+            .map((step) => {
+                try {
+                    return JSON.parse(step.diff ?? "null") as FileDiff;
+                } catch {
+                    return null;
+                }
+            })
+            .filter((diff): diff is FileDiff => Boolean(diff));
+
+        const agentMessage = await this.appendMessage(threadId, {
+            role: "agent",
+            content: result.content || "Agent completed the task.",
+            model: provider.modelId,
+            tokensUsed: result.totalTokens,
+            agentSteps: steps,
+            fileDiffs,
+            createdBy: this.getUserId(),
+            createdAt: new Date().toISOString(),
+            threadId,
+        });
+        await this.post({ type: "messageUpdated", threadId, message: agentMessage } satisfies StreamEvent);
+    }
+
+    private async ensureThread(threadId?: string): Promise<ChatThread> {
+        if (threadId) {
+            const existing = this.threads.find((thread) => thread.id === threadId);
+            if (existing) {
+                this.activeThreadId = threadId;
+                return existing;
+            }
+        }
+
+        const created = await this.createThread();
+        this.activeThreadId = created.id;
+        return created;
+    }
+
+    private async createThread(name?: string): Promise<ChatThread> {
+        const payload = {
+            sessionId: this.snapshot.session?.id,
+            name,
+            createdBy: this.getUserId(),
+        };
+        const response = await this.apiFetch<{ thread: ChatThread }>("/chat/threads", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
+
+        this.threads = [response.thread, ...this.threads.filter((thread) => thread.id !== response.thread.id)];
+        this.threadMessages.set(response.thread.id, []);
+        this.activeThreadId = response.thread.id;
+        await this.refresh();
+        return response.thread;
+    }
+
+    private async switchThread(threadId: string): Promise<void> {
+        const thread = this.threads.find((item) => item.id === threadId);
+        if (!thread) {
+            return;
+        }
+
         this.activeThreadId = threadId;
-        return existing;
-      }
+        await this.loadHistory(threadId);
     }
 
-    const created = await this.createThread();
-    this.activeThreadId = created.id;
-    return created;
-  }
-
-  private async createThread(name?: string): Promise<ChatThread> {
-    const payload = {
-      sessionId: this.snapshot.session?.id,
-      name,
-      createdBy: this.getUserId(),
-    };
-    const response = await this.apiFetch<{ thread: ChatThread }>("/chat/threads", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-
-    this.threads = [response.thread, ...this.threads.filter((thread) => thread.id !== response.thread.id)];
-    this.threadMessages.set(response.thread.id, []);
-    this.activeThreadId = response.thread.id;
-    await this.refresh();
-    return response.thread;
-  }
-
-  private async switchThread(threadId: string): Promise<void> {
-    const thread = this.threads.find((item) => item.id === threadId);
-    if (!thread) {
-      return;
+    private async forkThread(messageId: string, name?: string): Promise<void> {
+        const response = await this.apiFetch<{ thread: ChatThread }>("/chat/threads", {
+            method: "POST",
+            body: JSON.stringify({
+                sessionId: this.snapshot.session?.id,
+                name,
+                createdBy: this.getUserId(),
+                forkedFromMessageId: messageId,
+            }),
+        });
+        this.threads = [response.thread, ...this.threads.filter((thread) => thread.id !== response.thread.id)];
+        this.threadMessages.set(response.thread.id, []);
+        this.activeThreadId = response.thread.id;
+        await this.loadHistory(response.thread.id);
     }
 
-    this.activeThreadId = threadId;
-    await this.loadHistory(threadId);
-  }
+    private async loadHistory(threadId?: string): Promise<void> {
+        if (!threadId) {
+            return;
+        }
 
-  private async forkThread(messageId: string, name?: string): Promise<void> {
-    const response = await this.apiFetch<{ thread: ChatThread }>("/chat/threads", {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: this.snapshot.session?.id,
-        name,
-        createdBy: this.getUserId(),
-        forkedFromMessageId: messageId,
-      }),
-    });
-    this.threads = [response.thread, ...this.threads.filter((thread) => thread.id !== response.thread.id)];
-    this.threadMessages.set(response.thread.id, []);
-    this.activeThreadId = response.thread.id;
-    await this.loadHistory(response.thread.id);
-  }
-
-  private async loadHistory(threadId?: string): Promise<void> {
-    if (!threadId) {
-      return;
-    }
-
-    const result = await this.apiFetch<{ messages: PanelMessage[]; nextCursor?: string }>(`/chat/threads/${threadId}/messages`);
-    this.threadMessages.set(threadId, result.messages);
-    await this.refresh();
-  }
-
-  private async resolveDecision(
-    key: string | undefined,
-    filePath: string | undefined,
-    review: "approved" | "rejected"
-  ): Promise<void> {
-    if (key && this.pendingSafety.has(key)) {
-      const pending = this.pendingSafety.get(key);
-      this.pendingSafety.delete(key);
-      pending?.resolve(review === "approved" ? "proceed" : "skip");
-      return;
-    }
-
-    if (filePath && this.activeThreadId) {
-      const messages = this.threadMessages.get(this.activeThreadId) ?? [];
-      const target = [...messages].reverse().find((message) => {
-        return (message.fileDiffs ?? []).some((diff) => diff.filePath === filePath);
-      });
-      if (target) {
-        target.reviewed = review;
+        const result = await this.apiFetch<{ messages: PanelMessage[]; nextCursor?: string }>(`/chat/threads/${threadId}/messages`);
+        this.threadMessages.set(threadId, result.messages);
         await this.refresh();
-      }
-    }
-  }
-
-  private async buildProviderStatus(): Promise<ProviderStatus> {
-    const activeProvider = await this.apiKeyStore.getActiveProvider();
-    const activeModel = (await this.apiKeyStore.getModel(activeProvider)) ?? this.router.getDefaultModelForProvider(activeProvider);
-    const ollamaUrl = await this.apiKeyStore.getOllamaUrl();
-    const key = await this.apiKeyStore.getKey(activeProvider);
-    const hasKey = activeProvider === "ollama" ? true : Boolean(key && key.trim());
-    const provider = this.router.getProvider({
-      provider: activeProvider,
-      apiKey: key,
-      modelId: activeModel,
-      ollamaUrl,
-    });
-
-    let models: string[] = [];
-    try {
-      models = [...(await provider.listModels())];
-    } catch {
-      models = [activeModel];
     }
 
-    this.assembler.setTokenProvider(provider);
-    return { activeProvider, activeModel, hasKey, ollamaUrl, models };
-  }
+    private async resolveDecision(
+        key: string | undefined,
+        filePath: string | undefined,
+        review: "approved" | "rejected"
+    ): Promise<void> {
+        if (key && this.pendingSafety.has(key)) {
+            const pending = this.pendingSafety.get(key);
+            this.pendingSafety.delete(key);
+            pending?.resolve(review === "approved" ? "proceed" : "skip");
+            return;
+        }
 
-  private async buildProvider(): Promise<ILLMProvider> {
-    const activeProvider = await this.apiKeyStore.getActiveProvider();
-    const activeModel = (await this.apiKeyStore.getModel(activeProvider)) ?? this.router.getDefaultModelForProvider(activeProvider);
-    const ollamaUrl = await this.apiKeyStore.getOllamaUrl();
-    const key = await this.apiKeyStore.getKey(activeProvider);
-    const provider = this.router.getProvider({
-      provider: activeProvider,
-      apiKey: key,
-      modelId: activeModel,
-      ollamaUrl,
-    });
-    this.assembler.setTokenProvider(provider);
-    return provider;
-  }
-
-  private toCompletionMessages(messages: readonly PanelMessage[]): readonly ChatCompletionMessage[] {
-    return messages.flatMap((message): ChatCompletionMessage[] => {
-      if (message.role === "user") {
-        return [{ role: "user", content: message.content }];
-      }
-      if (message.role === "assistant" || message.role === "agent") {
-        return [{ role: "assistant", content: message.content }];
-      }
-      return [];
-    });
-  }
-
-  private async appendMessage(threadId: string, message: Partial<PanelMessage> & Pick<PanelMessage, "role" | "content" | "createdBy" | "createdAt" | "threadId">): Promise<PanelMessage> {
-    const response = await this.apiFetch<{ message: PanelMessage }>(`/chat/threads/${threadId}/messages`, {
-      method: "POST",
-      body: JSON.stringify(message),
-    });
-    const stored = response.message;
-    const messages = this.threadMessages.get(threadId) ?? [];
-    this.threadMessages.set(threadId, [...messages, stored]);
-    await this.refresh();
-    return stored;
-  }
-
-  private async collectContextRefs(threadId: string): Promise<ContextRef[]> {
-    const messages = this.threadMessages.get(threadId) ?? [];
-    const refs: ContextRef[] = [];
-    for (const message of messages) {
-      for (const ref of message.contextRefs ?? []) {
-        refs.push(ref);
-      }
-    }
-    return refs;
-  }
-
-  private async loadThreads(): Promise<void> {
-    const sessionId = this.snapshot.session?.id;
-    if (!sessionId) {
-      this.threads = [];
-      return;
+        if (filePath && this.activeThreadId) {
+            const messages = this.threadMessages.get(this.activeThreadId) ?? [];
+            const target = [...messages].reverse().find((message) => {
+                return (message.fileDiffs ?? []).some((diff) => diff.filePath === filePath);
+            });
+            if (target) {
+                target.reviewed = review;
+                await this.refresh();
+            }
+        }
     }
 
-    const response = await this.apiFetch<{ threads: ChatThread[] }>(`/chat/threads?sessionId=${encodeURIComponent(sessionId)}`);
-    this.threads = response.threads;
-    if (!this.activeThreadId && this.threads.length > 0) {
-      this.activeThreadId = this.threads[0]!.id;
-    }
-    if (this.activeThreadId) {
-      await this.loadHistory(this.activeThreadId);
-    }
-  }
+    private async buildProviderStatus(): Promise<ProviderStatus> {
+        const activeProvider = await this.apiKeyStore.getActiveProvider();
+        const activeModel = (await this.apiKeyStore.getModel(activeProvider)) ?? this.router.getDefaultModelForProvider(activeProvider);
+        const ollamaUrl = await this.apiKeyStore.getOllamaUrl();
+        const key = await this.apiKeyStore.getKey(activeProvider);
+        const hasKey = activeProvider === "ollama" ? true : Boolean(key && key.trim());
+        const provider = this.router.getProvider({
+            provider: activeProvider,
+            apiKey: key,
+            modelId: activeModel,
+            ollamaUrl,
+        });
 
-  private async apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const auth = this.authService.getState();
-    const backendUrl = vscode.workspace.getConfiguration("codesync").get<string>("backendUrl") ?? "http://localhost:3000";
-    const headers = new Headers(options.headers);
-    headers.set("Content-Type", "application/json");
-    if (auth.accessToken) {
-      headers.set("Authorization", `Bearer ${auth.accessToken}`);
-    }
+        let models: string[] = [];
+        try {
+            models = [...(await provider.listModels())];
+        } catch {
+            models = [activeModel];
+        }
 
-    const response = await fetch(`${backendUrl}${path}`, {
-      ...options,
-      headers,
-    });
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error((body as any).error ?? `${response.status} ${response.statusText}`);
+        this.assembler.setTokenProvider(provider);
+        return { activeProvider, activeModel, hasKey, ollamaUrl, models };
     }
 
-    return response.json() as Promise<T>;
-  }
+    private async buildProvider(): Promise<ILLMProvider> {
+        const activeProvider = await this.apiKeyStore.getActiveProvider();
+        const activeModel = (await this.apiKeyStore.getModel(activeProvider)) ?? this.router.getDefaultModelForProvider(activeProvider);
+        const ollamaUrl = await this.apiKeyStore.getOllamaUrl();
+        const key = await this.apiKeyStore.getKey(activeProvider);
+        const provider = this.router.getProvider({
+            provider: activeProvider,
+            apiKey: key,
+            modelId: activeModel,
+            ollamaUrl,
+        });
+        this.assembler.setTokenProvider(provider);
+        return provider;
+    }
 
-  private getUserId(): string {
-    return String(this.authService.getState().user?.id ?? "anonymous");
-  }
+    private toCompletionMessages(messages: readonly PanelMessage[]): readonly ChatCompletionMessage[] {
+        return messages.flatMap((message): ChatCompletionMessage[] => {
+            if (message.role === "user") {
+                return [{ role: "user", content: message.content }];
+            }
+            if (message.role === "assistant" || message.role === "agent") {
+                return [{ role: "assistant", content: message.content }];
+            }
+            return [];
+        });
+    }
 
-  private async post(message: StreamEvent): Promise<void> {
-    await this.view?.webview.postMessage(message);
-  }
+    private async appendMessage(threadId: string, message: Partial<PanelMessage> & Pick<PanelMessage, "role" | "content" | "createdBy" | "createdAt" | "threadId">): Promise<PanelMessage> {
+        const response = await this.apiFetch<{ message: PanelMessage }>(`/chat/threads/${threadId}/messages`, {
+            method: "POST",
+            body: JSON.stringify(message),
+        });
+        const stored = response.message;
+        const messages = this.threadMessages.get(threadId) ?? [];
+        this.threadMessages.set(threadId, [...messages, stored]);
+        await this.refresh();
+        return stored;
+    }
 
-  private renderHtml(webview: vscode.Webview): string {
-    const nonce = crypto.randomUUID().replace(/-/g, "");
-    return `<!DOCTYPE html>
+    private async collectContextRefs(threadId: string): Promise<ContextRef[]> {
+        const messages = this.threadMessages.get(threadId) ?? [];
+        const refs: ContextRef[] = [];
+        for (const message of messages) {
+            for (const ref of message.contextRefs ?? []) {
+                refs.push(ref);
+            }
+        }
+        return refs;
+    }
+
+    private async loadThreads(): Promise<void> {
+        const sessionId = this.snapshot.session?.id;
+        if (!sessionId) {
+            this.threads = [];
+            return;
+        }
+
+        const response = await this.apiFetch<{ threads: ChatThread[] }>(`/chat/threads?sessionId=${encodeURIComponent(sessionId)}`);
+        this.threads = response.threads;
+        if (!this.activeThreadId && this.threads.length > 0) {
+            this.activeThreadId = this.threads[0]!.id;
+        }
+        if (this.activeThreadId) {
+            await this.loadHistory(this.activeThreadId);
+        }
+    }
+
+    private async apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+        const auth = this.authService.getState();
+        const backendUrl = vscode.workspace.getConfiguration("conduit").get<string>("backendUrl") ?? "http://localhost:4000";
+        const headers = new Headers(options.headers);
+        headers.set("Content-Type", "application/json");
+        if (auth.accessToken) {
+            headers.set("Authorization", `Bearer ${auth.accessToken}`);
+        }
+
+        const response = await fetch(`${backendUrl}${path}`, {
+            ...options,
+            headers,
+        });
+
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error((body as any).error ?? `${response.status} ${response.statusText}`);
+        }
+
+        return response.json() as Promise<T>;
+    }
+
+    private getUserId(): string {
+        return String(this.authService.getState().user?.id ?? "anonymous");
+    }
+
+    private async post(message: StreamEvent): Promise<void> {
+        await this.view?.webview.postMessage(message);
+    }
+
+    private renderHtml(webview: vscode.Webview): string {
+        const nonce = crypto.randomUUID().replace(/-/g, "");
+        return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -667,7 +667,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider, vscode.Dis
   <div class="app">
     <aside class="sidebar">
       <div>
-        <div class="title">CodeSync AI</div>
+        <div class="title">Conduit AI</div>
         <div class="small" id="providerLine">Loading provider...</div>
       </div>
       <div class="card" style="padding:10px;">
@@ -929,5 +929,5 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider, vscode.Dis
   </script>
 </body>
 </html>`;
-  }
+    }
 }

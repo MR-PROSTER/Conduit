@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as Y from "yjs";
-import type { FilesystemEvent } from "@codesync/shared-types";
+import type { FilesystemEvent } from "@conduit/shared-types";
 
 export interface DisposableLike {
   dispose(): void;

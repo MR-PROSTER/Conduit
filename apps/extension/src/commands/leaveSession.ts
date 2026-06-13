@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import type { ExtensionServices } from "./index.js";
 
 export function leaveSessionCommand(services: ExtensionServices): vscode.Disposable {
-  return vscode.commands.registerCommand("codesync.leaveSession", async () => {
+  return vscode.commands.registerCommand("conduit.leaveSession", async () => {
     try {
       const snapshot = services.broadcastHub.getSnapshot();
       if (snapshot.state === "disconnected") {

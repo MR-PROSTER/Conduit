@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import type { CodeSyncWebSocketClient } from "./wsClient.js";
+import type { ConduitWebSocketClient } from "./wsClient.js";
 
 export class DraftRestoreController {
-  constructor(private readonly wsClient: CodeSyncWebSocketClient) {}
+  constructor(private readonly wsClient: ConduitWebSocketClient) {}
 
   async promptToRestoreUnresolvedDrafts(): Promise<void> {
     try {

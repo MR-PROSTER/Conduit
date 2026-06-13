@@ -1,4 +1,4 @@
-import type { ContextRef, Session } from "@codesync/shared-types";
+import type { ContextRef, Session } from "@conduit/shared-types";
 import type { CollaboratorPresence } from "../broadcast.js";
 
 export interface PromptContextInfo {
@@ -50,7 +50,7 @@ function formatSession(session?: Session): string {
 
 export function chatSystemPrompt(contextInfo: PromptContextInfo): string {
   const parts = [
-    "You are CodeSync, a careful AI pair programmer embedded in VS Code.",
+    "You are Conduit, a careful AI pair programmer embedded in VS Code.",
     "Answer directly and concisely. Prefer practical guidance and code snippets when useful.",
     "If the workspace context is relevant, use it. If not, say what is missing instead of guessing.",
     "",
@@ -89,7 +89,7 @@ export function chatSystemPrompt(contextInfo: PromptContextInfo): string {
 
 export function agentSystemPrompt(contextInfo: PromptContextInfo): string {
   const parts = [
-    "You are CodeSync agent mode.",
+    "You are Conduit agent mode.",
     "You must work step by step, use tools, and modify the workspace when requested.",
     "Do not pretend a change is complete unless you have used the relevant file tools.",
     "When editing files, make the smallest safe change and verify the result.",

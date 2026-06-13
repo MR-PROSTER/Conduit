@@ -45,13 +45,13 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.712.0
         version: 3.1068.0
-      '@codesync/collaboration-core':
+      '@conduit/collaboration-core':
         specifier: workspace:*
         version: link:../../packages/collaboration-core
-      '@codesync/git-core':
+      '@conduit/git-core':
         specifier: workspace:*
         version: link:../../packages/git-core
-      '@codesync/shared-types':
+      '@conduit/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
       '@supabase/supabase-js':
@@ -96,16 +96,16 @@ importers:
 
   apps/extension:
     dependencies:
-      '@codesync/ai-core':
+      '@conduit/ai-core':
         specifier: workspace:*
         version: link:../../packages/ai-core
-      '@codesync/collaboration-core':
+      '@conduit/collaboration-core':
         specifier: workspace:*
         version: link:../../packages/collaboration-core
-      '@codesync/git-core':
+      '@conduit/git-core':
         specifier: workspace:*
         version: link:../../packages/git-core
-      '@codesync/shared-types':
+      '@conduit/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
       diff:
@@ -128,7 +128,7 @@ importers:
         version: 13.6.31
     devDependencies:
       '@types/vscode':
-        specifier: ^1.99.0
+        specifier: ^1.85.0
         version: 1.120.0
       '@types/ws':
         specifier: ^8.5.10
@@ -139,7 +139,7 @@ importers:
       '@anthropic-ai/sdk':
         specifier: '*'
         version: 0.104.1
-      '@codesync/shared-types':
+      '@conduit/shared-types':
         specifier: workspace:*
         version: link:../shared-types
       groq-sdk:
@@ -151,7 +151,7 @@ importers:
 
   packages/collaboration-core:
     dependencies:
-      '@codesync/shared-types':
+      '@conduit/shared-types':
         specifier: workspace:*
         version: link:../shared-types
       y-protocols:
@@ -166,7 +166,7 @@ importers:
 
   packages/git-core:
     dependencies:
-      '@codesync/shared-types':
+      '@conduit/shared-types':
         specifier: workspace:*
         version: link:../shared-types
 

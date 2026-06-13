@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
 import * as Y from "yjs";
-import type { Room, Session } from "@codesync/shared-types";
-import type { IGitService } from "@codesync/git-core";
+import type { Room, Session } from "@conduit/shared-types";
+import type { IGitService } from "@conduit/git-core";
 import type { AuthService } from "./AuthService.js";
 import type { BranchSessionRegistry } from "./BranchSessionRegistry.js";
-import type { CodeSyncWebSocketClient } from "./wsClient.js";
+import type { ConduitWebSocketClient } from "./wsClient.js";
 
 export type SessionLifecycleState = "IDLE" | "ACTIVE";
 export type LeaveGracefulChoice = "commit" | "draft" | "discard";
@@ -26,7 +26,7 @@ export class SessionManager implements vscode.Disposable {
   private activeSession: ActiveSessionRecord | undefined;
 
   constructor(
-    private readonly wsClient: CodeSyncWebSocketClient,
+    private readonly wsClient: ConduitWebSocketClient,
     private readonly gitService: IGitService,
     private readonly branchSessionRegistry: BranchSessionRegistry,
     private readonly authService: AuthService
@@ -57,7 +57,7 @@ export class SessionManager implements vscode.Disposable {
     this.ensureActive();
 
     if (choice === "commit") {
-      await this.gitService.commit("CodeSync session changes", { all: true });
+      await this.gitService.commit("Conduit session changes", { all: true });
       await this.wsClient.disconnect(false);
     } else if (choice === "draft") {
       await this.wsClient.disconnect(true);
@@ -131,7 +131,7 @@ export class SessionManager implements vscode.Disposable {
       this.state = "ACTIVE";
     }
 
-    await vscode.commands.executeCommand("codesync.restoreDrafts");
+    await vscode.commands.executeCommand("conduit.restoreDrafts");
   }
 
   dispose(): void {
@@ -239,13 +239,13 @@ export class SessionManager implements vscode.Disposable {
 
   private ensureIdle(): void {
     if (this.state !== "IDLE") {
-      throw new Error("A CodeSync session is already active.");
+      throw new Error("A Conduit session is already active.");
     }
   }
 
   private ensureActive(): void {
     if (this.state !== "ACTIVE" || !this.activeSession) {
-      throw new Error("No active CodeSync session exists.");
+      throw new Error("No active Conduit session exists.");
     }
   }
 

@@ -1,8 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import type { ContextRef, Session } from "@codesync/shared-types";
-import type { ILLMProvider } from "@codesync/ai-core";
+import type { ContextRef, Session } from "@conduit/shared-types";
+import type { ILLMProvider } from "@conduit/ai-core";
 import type { CollaboratorPresence } from "../broadcast.js";
 
 export interface AssembledContext {

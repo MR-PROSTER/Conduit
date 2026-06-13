@@ -1,11 +1,11 @@
 {
-  "name": "@codesync/git-core",
+  "name": "@conduit/git-core",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "@codesync/shared-types": "workspace:*"
+    "@conduit/shared-types": "workspace:*"
   },
   "scripts": {
     "build": "tsc -b"

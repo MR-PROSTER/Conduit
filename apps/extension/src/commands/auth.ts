@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import type { ExtensionServices } from "./index.js";
 
 export function signInCommand(services: ExtensionServices): vscode.Disposable {
-  return vscode.commands.registerCommand("codesync.signIn", async () => {
+  return vscode.commands.registerCommand("conduit.signIn", async () => {
     try {
       const state = await services.authService.signIn();
       const currentSnapshot = services.broadcastHub.getSnapshot();
@@ -27,7 +27,7 @@ export function signInCommand(services: ExtensionServices): vscode.Disposable {
 }
 
 export function signOutCommand(services: ExtensionServices): vscode.Disposable {
-  return vscode.commands.registerCommand("codesync.signOut", async () => {
+  return vscode.commands.registerCommand("conduit.signOut", async () => {
     try {
       await services.authService.signOut();
       await services.wsClient.disconnect(false);
@@ -39,7 +39,7 @@ export function signOutCommand(services: ExtensionServices): vscode.Disposable {
 }
 
 export function showAccountCommand(services: ExtensionServices): vscode.Disposable {
-  return vscode.commands.registerCommand("codesync.showAccount", async () => {
+  return vscode.commands.registerCommand("conduit.showAccount", async () => {
     const state = services.authService.getState();
     if (!state.accessToken || !state.user) {
       vscode.window.showInformationMessage("Not signed in.");
@@ -52,11 +52,11 @@ export function showAccountCommand(services: ExtensionServices): vscode.Disposab
         { label: `Email: ${state.user.email || "No email"}` },
         { label: "Sign Out", description: "Sign out of your account" },
       ],
-      { title: "CodeSync Account Information" }
+      { title: "Conduit Account Information" }
     );
 
     if (selection?.label === "Sign Out") {
-      await vscode.commands.executeCommand("codesync.signOut");
+      await vscode.commands.executeCommand("conduit.signOut");
     }
   });
 }

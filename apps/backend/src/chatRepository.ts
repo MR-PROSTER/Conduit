@@ -7,7 +7,7 @@ import type {
   AgentStep,
   FileDiff,
   SafetyBlock,
-} from "@codesync/shared-types";
+} from "@conduit/shared-types";
 import { getSupabaseClient } from "./supabaseClient.js";
 
 export interface CreateThreadInput {

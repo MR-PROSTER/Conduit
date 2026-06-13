@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import type { AgentToolCall, ChatCompletionMessage, ILLMProvider } from "@codesync/ai-core";
-import type { AgentMemory, AgentStep, FileDiff, SafetyBlock } from "@codesync/shared-types";
+import type { AgentToolCall, ChatCompletionMessage, ILLMProvider } from "@conduit/ai-core";
+import type { AgentMemory, AgentStep, FileDiff, SafetyBlock } from "@conduit/shared-types";
 import type { AgentMemoryManager } from "./AgentMemoryManager.js";
 import type { AgentTools, AgentToolResult } from "./AgentTools.js";
 

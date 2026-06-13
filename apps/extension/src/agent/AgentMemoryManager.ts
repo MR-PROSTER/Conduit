@@ -5,7 +5,7 @@ import type {
   AgentMemory,
   AgentObservation,
   FileMemoryEntry,
-} from "@codesync/shared-types";
+} from "@conduit/shared-types";
 
 type MemoryUpdate = Partial<AgentMemory>;
 

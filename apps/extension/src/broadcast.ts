@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { Room, Session } from "@codesync/shared-types";
+import type { Room, Session } from "@conduit/shared-types";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
 

@@ -1,5 +1,5 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import type { Room } from "@codesync/shared-types";
+import type { Room } from "@conduit/shared-types";
 
 export class PermissionError extends Error {
   constructor(

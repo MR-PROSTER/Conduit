@@ -5,8 +5,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { diffLines } from "diff";
 import * as vscode from "vscode";
-import type { AgentToolDefinition } from "@codesync/ai-core";
-import type { DiffHunk, DiffLine, FileDiff, SafetyBlock } from "@codesync/shared-types";
+import type { AgentToolDefinition } from "@conduit/ai-core";
+import type { DiffHunk, DiffLine, FileDiff, SafetyBlock } from "@conduit/shared-types";
 import type { AgentSafetyLock, SafetyCheckResult } from "./AgentSafetyLock.js";
 
 const execFileAsync = promisify(execFile);
