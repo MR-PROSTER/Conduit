@@ -2,6 +2,7 @@
   "name": "conduit",
   "version": "0.1.0",
   "publisher": "conduit",
+  "type": "module",
   "main": "./dist/extension.js",
   "types": "./dist/index.d.ts",
   "engines": {
@@ -118,12 +119,12 @@
       "properties": {
         "conduit.websocketUrl": {
           "type": "string",
-          "default": "wss://conduitbackend-production-734e.up.railway.app/ws",
+          "default": "ws://localhost:4000/ws",
           "description": "WebSocket URL for conduit backend"
         },
         "conduit.backendUrl": {
           "type": "string",
-          "default": "https://conduitbackend-production-734e.up.railway.app",
+          "default": "http://localhost:4000",
           "description": "HTTP URL for conduit backend"
         }
       }

@@ -96,18 +96,6 @@ importers:
 
   apps/extension:
     dependencies:
-      '@conduit/ai-core':
-        specifier: workspace:*
-        version: link:../../packages/ai-core
-      '@conduit/collaboration-core':
-        specifier: workspace:*
-        version: link:../../packages/collaboration-core
-      '@conduit/git-core':
-        specifier: workspace:*
-        version: link:../../packages/git-core
-      '@conduit/shared-types':
-        specifier: workspace:*
-        version: link:../../packages/shared-types
       diff:
         specifier: '*'
         version: 9.0.0
@@ -127,6 +115,18 @@ importers:
         specifier: '*'
         version: 13.6.31
     devDependencies:
+      '@conduit/ai-core':
+        specifier: workspace:*
+        version: link:../../packages/ai-core
+      '@conduit/collaboration-core':
+        specifier: workspace:*
+        version: link:../../packages/collaboration-core
+      '@conduit/git-core':
+        specifier: workspace:*
+        version: link:../../packages/git-core
+      '@conduit/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
       '@types/vscode':
         specifier: ^1.85.0
         version: 1.120.0
