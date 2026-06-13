@@ -83,7 +83,7 @@ export class RoomPermissionService {
    * Asserts that a user has active access (either as the owner or an active member) to a room.
    */
   async assertActiveRoomAccess(userId: string, roomId: string): Promise<RoomAccess> {
-    // Retrieve room details using Supabase
+    // Retrieve room details using Supabase (bypassing RLS via service role)
     const { data: room, error: roomError } = await this.supabase
       .from("rooms")
       .select("*")
@@ -91,18 +91,27 @@ export class RoomPermissionService {
       .single();
 
     if (roomError || !room) {
+      if (roomError) {
+        console.error("[conduit-backend] assertActiveRoomAccess database error:", JSON.stringify(roomError));
+      } else {
+        console.warn("[conduit-backend] assertActiveRoomAccess: room not found for ID:", roomId);
+      }
       throw new PermissionError(404, "Room not found");
     }
 
     const isOwner = room.owner_id === userId;
 
-    // Retrieve membership details
+    // Retrieve membership details (bypassing RLS via service role)
     const { data: member, error: memberError } = await this.supabase
       .from("room_members")
       .select("*")
       .eq("room_id", roomId)
       .eq("user_id", userId)
       .maybeSingle();
+
+    if (memberError) {
+      console.error("[conduit-backend] assertActiveRoomAccess membership query error:", JSON.stringify(memberError));
+    }
 
     const role = member ? (member.role as "member" | "admin") : null;
     const status = member ? (member.status as "active" | "banned") : null;

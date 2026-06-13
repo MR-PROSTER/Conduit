@@ -41,6 +41,12 @@ export function createBackendServer(config?: BackendServerConfig): BackendServer
     app.disable("x-powered-by");
     app.use(express.json({ limit: "50mb" }));
 
+    // Global HTTP request logger
+    app.use((req, res, next) => {
+        console.log(`[conduit-backend] HTTP ${req.method} ${req.path}`);
+        next();
+    });
+
     // Initialize Supabase client
     const supabaseUrl = config?.supabaseUrl || process.env.SUPABASE_URL || "";
     const supabaseKey =
@@ -106,21 +112,55 @@ export function createBackendServer(config?: BackendServerConfig): BackendServer
 
             if (error) throw error;
 
-            // In-memory rooms
+            if (!dbSessions || dbSessions.length === 0) {
+                res.json({ rooms: [] });
+                return;
+            }
+
+            const roomIds = Array.from(new Set(dbSessions.map((s) => s.room_id)));
+
+            // Query rooms
+            const { data: dbRooms, error: roomError } = await supabase
+                .from("rooms")
+                .select("*")
+                .in("id", roomIds);
+
+            if (roomError) throw roomError;
+
+            // Query owners
+            const ownerIds = Array.from(new Set((dbRooms || []).map((r) => r.owner_id)));
+            const { data: dbUsers, error: userError } = await supabase
+                .from("users")
+                .select("*")
+                .in("id", ownerIds);
+
+            if (userError) throw userError;
+
+            const roomsMap = new Map((dbRooms || []).map((r) => [r.id, r]));
+            const usersMap = new Map((dbUsers || []).map((u) => [u.id, u]));
             const inMemoryRooms = roomManager.list();
 
-            // Join DB sessions + in-memory rooms
-            const activeSessions = (dbSessions || []).map((dbSession) => {
+            const roomsPayload = dbSessions.map((dbSession) => {
+                const room = roomsMap.get(dbSession.room_id);
+                const owner = room ? usersMap.get(room.owner_id) : undefined;
                 const inMemory = inMemoryRooms.find((r) => r.session.sessionId === dbSession.id);
+
                 return {
-                    ...dbSession,
+                    roomId: dbSession.room_id,
+                    roomName: room ? room.repository_name : undefined,
+                    repoUrl: room ? room.repository_remote_url : undefined,
+                    ownerId: room ? room.owner_id : undefined,
+                    ownerEmail: owner ? owner.email : undefined,
+                    ownerUsername: owner ? owner.name : undefined,
+                    branch: dbSession.branch,
+                    sessionId: dbSession.id,
+                    roomKey: `${dbSession.room_id}:${dbSession.branch}:${dbSession.id}`,
                     connectionCount: inMemory ? inMemory.connectionCount : 0,
-                    lastTouchedAt: inMemory ? inMemory.lastTouchedAt : dbSession.last_active_at,
-                    isActiveInMemory: !!inMemory,
+                    lastTouchedAt: inMemory ? inMemory.lastTouchedAt.toISOString() : (dbSession.last_active_at || new Date().toISOString()),
                 };
             });
 
-            res.json(activeSessions);
+            res.json({ rooms: roomsPayload });
         } catch (err) {
             sendError(res, err);
         }

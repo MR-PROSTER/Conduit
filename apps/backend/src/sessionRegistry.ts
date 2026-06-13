@@ -32,6 +32,13 @@ export function extractRoomKey(urlStr: string, pathPrefix?: string): string {
   const url = new URL(urlStr, "http://localhost");
   let pathname = url.pathname;
 
+  // Strip leading "/ws" or "/ws/" if present
+  if (pathname.startsWith("/ws/")) {
+    pathname = pathname.substring(4);
+  } else if (pathname.startsWith("/ws")) {
+    pathname = pathname.substring(3);
+  }
+
   if (pathPrefix) {
     const prefix = pathPrefix.startsWith("/") ? pathPrefix : "/" + pathPrefix;
     if (pathname.startsWith(prefix)) {

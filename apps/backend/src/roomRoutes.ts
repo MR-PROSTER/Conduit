@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import type { Room } from "@conduit/shared-types";
+import type { Room, Session } from "@conduit/shared-types";
 import { RoomPermissionService } from "./permissions.js";
 import { getSupabaseClient } from "./supabaseClient.js";
 import { sendError, requireNonEmptyString } from "./authRoutes.js";
@@ -22,18 +22,22 @@ export function createRoomRouter(permissions: RoomPermissionService): Router {
   // Apply auth middleware to all room routes
   router.use(requireAuth);
 
-  // POST /rooms { repositoryName, repositoryOwner, repositoryRemoteUrl, defaultBranch } → { room }
+  // POST /rooms { id, repositoryName/name, repositoryOwner, repositoryRemoteUrl/repoUrl, defaultBranch } → { room }
   router.post("/rooms", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { repositoryName, repositoryOwner, repositoryRemoteUrl, defaultBranch } = req.body;
+      console.log("[conduit-backend] POST /rooms received body:", JSON.stringify(req.body));
+      const { id, repositoryName, name, repositoryOwner, repositoryRemoteUrl, repoUrl, defaultBranch } = req.body;
 
-      const repoName = requireNonEmptyString(repositoryName, "repositoryName");
-      const repoOwner = repositoryOwner
+      const repoName = repositoryName || name;
+      const repoRemoteUrl = repositoryRemoteUrl || repoUrl;
+
+      const cleanedName = requireNonEmptyString(repoName, "repositoryName or name");
+      const repoOwnerVal = repositoryOwner
         ? requireNonEmptyString(repositoryOwner, "repositoryOwner")
         : null;
-      const repoRemoteUrl = repositoryRemoteUrl
-        ? requireNonEmptyString(repositoryRemoteUrl, "repositoryRemoteUrl")
+      const repoRemoteUrlVal = repoRemoteUrl
+        ? requireNonEmptyString(repoRemoteUrl, "repositoryRemoteUrl or repoUrl")
         : null;
       const defBranch = defaultBranch
         ? requireNonEmptyString(defaultBranch, "defaultBranch")
@@ -44,19 +48,46 @@ export function createRoomRouter(permissions: RoomPermissionService): Router {
         throw new Error("Supabase client not initialized");
       }
 
-      const { data: roomData, error } = await supabase
-        .from("rooms")
-        .insert({
-          repository_name: repoName,
-          repository_owner: repoOwner,
-          repository_remote_url: repoRemoteUrl,
-          default_branch: defBranch,
-          owner_id: user.id,
-        })
-        .select()
-        .single();
+      let roomData;
+      if (id) {
+        // Check if room already exists
+        const { data: existingRoom } = await supabase
+          .from("rooms")
+          .select("*")
+          .eq("id", id)
+          .maybeSingle();
 
-      if (error) throw error;
+        if (existingRoom) {
+          console.log("[conduit-backend] Room already exists in DB, verifying access for user:", user.id);
+          // Verify user has active access to this existing room
+          await permissions.assertActiveRoomAccess(user.id, id);
+          roomData = existingRoom;
+        }
+      }
+
+      if (!roomData) {
+        console.log("[conduit-backend] Room does not exist, inserting room ID:", id || "auto-generated");
+        // Room does not exist, let's insert it
+        const { data: newRoom, error: insertError } = await supabase
+          .from("rooms")
+          .insert({
+            id: id || undefined,
+            repository_name: cleanedName,
+            repository_owner: repoOwnerVal,
+            repository_remote_url: repoRemoteUrlVal,
+            default_branch: defBranch,
+            owner_id: user.id,
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error("[conduit-backend] Error inserting room to DB:", insertError);
+          throw insertError;
+        }
+        roomData = newRoom;
+        console.log("[conduit-backend] Successfully inserted room to DB:", JSON.stringify(roomData));
+      }
 
       const room: Room = {
         id: roomData.id,
@@ -68,9 +99,87 @@ export function createRoomRouter(permissions: RoomPermissionService): Router {
 
       res.status(201).json({ room });
     } catch (error) {
+      console.error("[conduit-backend] POST /rooms handler caught error:", error);
       sendError(res, error);
     }
   });
+
+  // POST /sessions { id, roomId, branch, baseCommitHash, status } → { session }
+  router.post("/sessions", async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      console.log("[conduit-backend] POST /sessions received body:", JSON.stringify(req.body));
+      const { id, roomId, branch, baseCommitHash, status } = req.body;
+
+      const sessId = requireNonEmptyString(id, "id");
+      const rId = requireNonEmptyString(roomId, "roomId");
+      const br = requireNonEmptyString(branch, "branch");
+      const baseHash = baseCommitHash || "HEAD";
+      const sessStatus = status || "active";
+
+      // Verify user has active access to this room
+      await permissions.assertActiveRoomAccess(user.id, rId);
+
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error("Supabase client not initialized");
+      }
+
+      let dbStatus: "active" | "ended" | "discarded" = "active";
+      if (sessStatus === "discarded") {
+        dbStatus = "discarded";
+      } else if (sessStatus === "saved") {
+        dbStatus = "ended";
+      }
+
+      console.log("[conduit-backend] Upserting session ID:", sessId);
+      const { data: sessionData, error } = await supabase
+        .from("sessions")
+        .upsert(
+          {
+            id: sessId,
+            room_id: rId,
+            branch: br,
+            base_commit_sha: baseHash,
+            status: dbStatus,
+            created_by: user.id,
+            last_active_at: new Date().toISOString(),
+          },
+          { onConflict: "id" }
+        )
+        .select()
+        .single();
+
+      if (error) {
+        console.error("[conduit-backend] Error upserting session to DB:", error);
+        throw error;
+      }
+
+      console.log("[conduit-backend] Successfully upserted session to DB:", JSON.stringify(sessionData));
+
+      let mappedStatus: "active" | "saved" | "discarded" = "active";
+      if (sessionData.status === "discarded") {
+        mappedStatus = "discarded";
+      } else if (sessionData.status === "ended") {
+        mappedStatus = "saved";
+      }
+
+      const session: Session = {
+        id: sessionData.id,
+        roomId: sessionData.room_id,
+        branch: sessionData.branch,
+        baseCommitHash: sessionData.base_commit_sha,
+        participants: [user.id],
+        status: mappedStatus,
+      };
+
+      res.status(201).json({ session });
+    } catch (error) {
+      console.error("[conduit-backend] POST /sessions handler caught error:", error);
+      sendError(res, error);
+    }
+  });
+
 
   // GET /rooms → { rooms: [] }
   router.get("/rooms", async (req: Request, res: Response) => {
@@ -94,6 +203,7 @@ export function createRoomRouter(permissions: RoomPermissionService): Router {
 
       // Query rooms owned by user or where they are a member
       let query = supabase.from("rooms").select("*");
+
       if (roomIds.length > 0) {
         query = query.or(`owner_id.eq.${user.id},id.in.(${roomIds.join(",")})`);
       } else {

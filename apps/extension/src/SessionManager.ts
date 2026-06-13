@@ -871,6 +871,18 @@ export class SessionManager implements vscode.Disposable {
       }
     });
 
+    provider.on("status", (event: { status: string }) => {
+      this.broadcastHub.log("info", `[WS-CLIENT-DEBUG] Provider status: ${event.status}`);
+    });
+
+    provider.on("sync", (isSynced: boolean) => {
+      this.broadcastHub.log("info", `[WS-CLIENT-DEBUG] Provider sync: ${isSynced}`);
+    });
+
+    provider.on("connection-error", (event: any) => {
+      this.broadcastHub.log("error", `[WS-CLIENT-DEBUG] Provider connection-error: ${event ? event.message || String(event) : "unknown"}`);
+    });
+
     provider.on("status", async (event: { status: string }) => {
       if (event.status === "connecting") {
         if (this.authService) {
@@ -934,8 +946,11 @@ export class SessionManager implements vscode.Disposable {
 
     try {
       this.registerSessionLifecycle(activeSession);
+      this.broadcastHub.log("info", `[WS-CLIENT-DEBUG] Calling provider.connect() for roomKey: ${roomKey}`);
       activeSession.provider.connect();
+      this.broadcastHub.log("info", `[WS-CLIENT-DEBUG] Waiting for Yjs sync...`);
       await this.waitForYjsSync(activeSession);
+      this.broadcastHub.log("info", `[WS-CLIENT-DEBUG] Yjs sync completed successfully!`);
       this.ensureSessionIsCurrent(activeSession);
 
       if (fileManager.isEmpty(roomKey)) {

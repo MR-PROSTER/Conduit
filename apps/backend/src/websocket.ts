@@ -59,9 +59,10 @@ export class CollaborationWebSocketServer {
         }
 
         // 4. Create the WebSocket server (noServer: true allows us to handle upgrades manually)
+        // We do not pass path: options.path here because the client connects with a dynamic path
+        // (e.g. /ws/roomId:branch:sessionId), which would otherwise cause ws library to abort the upgrade handshake.
         this.wss = new WebSocketServer({
             noServer: true,
-            path: options.path,
         });
 
         // 5. Initialize the heartbeat timer (30s interval)
@@ -97,36 +98,41 @@ export class CollaborationWebSocketServer {
 
             // 2. Perform the upgrade
             this.wss.handleUpgrade(request, socket, head, (ws: any) => {
-                // Register connection details
-                this.roomManager.register(roomKey, {
-                    roomId: descriptor.roomId,
-                    branch: descriptor.branch,
-                    sessionId: descriptor.sessionId,
-                });
-                this.sessionRegistry.register(roomKey, context);
+                try {
+                    // Register connection details
+                    this.roomManager.register(roomKey, {
+                        roomId: descriptor.roomId,
+                        branch: descriptor.branch,
+                        sessionId: descriptor.sessionId,
+                    });
+                    this.sessionRegistry.register(roomKey, context);
 
-                // Heartbeat state tracking
-                ws.isAlive = true;
-                ws.on("pong", () => {
+                    // Heartbeat state tracking
                     ws.isAlive = true;
-                });
+                    ws.on("pong", () => {
+                        ws.isAlive = true;
+                    });
 
-                // Cleanup on connection close
-                ws.on("close", () => {
-                    this.logger.info(`WebSocket connection closed for room: ${roomKey}`);
-                    this.roomManager.unregister(roomKey);
+                    // Cleanup on connection close
+                    ws.on("close", () => {
+                        this.logger.info(`WebSocket connection closed for room: ${roomKey}`);
+                        this.roomManager.unregister(roomKey);
 
-                    // Clean up session registry if there are no more active connections
-                    const managed = this.roomManager.get(roomKey);
-                    if (!managed || managed.connectionCount <= 0) {
-                        this.sessionRegistry.deregister(roomKey);
-                    }
-                });
+                        // Clean up session registry if there are no more active connections
+                        const managed = this.roomManager.get(roomKey);
+                        if (!managed || managed.connectionCount <= 0) {
+                            this.sessionRegistry.deregister(roomKey);
+                        }
+                    });
 
-                // 3. Delegate message protocol/syncing to setupWSConnection
-                setupWSConnection(ws, request, roomKey);
+                    // 3. Delegate message protocol/syncing to setupWSConnection
+                    setupWSConnection(ws, request, roomKey);
 
-                this.logger.info(`WebSocket connection established and setup for room: ${roomKey}`);
+                    this.logger.info(`WebSocket connection established and setup for room: ${roomKey}`);
+                } catch (err: any) {
+                    this.logger.error(`Error in WebSocket connection setup callback: ${err.message || String(err)}`);
+                    ws.close();
+                }
             });
         } catch (error: any) {
             const statusCode = error.statusCode || 401;

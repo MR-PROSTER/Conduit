@@ -30,7 +30,7 @@ export * from "./server.js";
 const server = createBackendServer({
     host: process.env.HOST || "0.0.0.0",
     port: process.env.PORT ? parseInt(process.env.PORT, 10) : 4000,
-    websocketPath: process.env.WEBSOCKET_PATH || "/",
+    websocketPath: process.env.WEBSOCKET_PATH || "/ws",
     supabaseUrl: process.env.SUPABASE_URL || "",
     supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || "",
 });

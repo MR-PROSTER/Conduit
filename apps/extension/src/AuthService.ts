@@ -258,7 +258,12 @@ export class AuthService {
     const payload = await this.fetchJson<{ readonly room: Room }>("/rooms", {
       method: "POST",
       headers: this.authHeaders(accessToken),
-      body: JSON.stringify(room)
+      body: JSON.stringify({
+        ...room,
+        repositoryName: room.name,
+        repositoryRemoteUrl: room.repoUrl,
+        repositoryOwner: room.ownerId
+      })
     });
     return payload.room;
   }
@@ -416,23 +421,29 @@ export class AuthService {
     const headers = new Headers(init.headers);
     headers.set("content-type", "application/json");
 
-    const response = await fetch(`${this.backendUrl}${path}`, {
-      ...init,
-      headers
-    });
-    const body = (await response.json().catch(() => ({}))) as {
-      readonly error?: string;
-    };
-    if (!response.ok) {
-      if (response.status === 401) {
-        await this.signOut();
+    const url = `${this.backendUrl}${path}`;
+    try {
+      const response = await fetch(url, {
+        ...init,
+        headers
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        readonly error?: string;
+      };
+      if (!response.ok) {
+        if (response.status === 401) {
+          await this.signOut();
+        }
+        throw new Error(
+          body.error ?? `Conduit request failed with ${String(response.status)}`
+        );
       }
-      throw new Error(
-        body.error ?? `Conduit request failed with ${String(response.status)}`
-      );
+      return body as T;
+    } catch (error: any) {
+      const cause = error?.cause ? ` (Cause: ${error.cause.message || String(error.cause)})` : "";
+      console.error(`[conduit-extension] fetchJson failed for URL: ${url}`, error);
+      throw new Error(`Connection failed: ${error.message || String(error)}${cause}`);
     }
-
-    return body as T;
   }
 
   private authHeaders(accessToken: string): Record<string, string> {
