@@ -12,11 +12,13 @@
     "@codesync/shared-types": "workspace:*",
     "@supabase/supabase-js": "^2",
     "dotenv": "^16",
+    "express": "^5.2.1",
     "ws": "^8.18.0",
     "y-websocket": "^2.0.4",
     "yjs": "^13.6.31"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/ws": "^8.5.10",
     "tsx": "^4.19.2"
   }
