@@ -4,6 +4,9 @@ import type { BroadcastHub, CollaborationSnapshot } from "./broadcast.js";
 import type { BranchSessionRegistry } from "./BranchSessionRegistry.js";
 import type { ConduitWebSocketClient } from "./wsClient.js";
 import type { AuthService } from "./AuthService.js";
+import { getButtons } from "./state/ButtonConfig.js";
+import { getStateManager } from "./state/ExtensionStateManager.js";
+import type { ConduitState } from "./state/ExtensionStateManager.js";
 
 export interface SessionDescriptor {
     readonly roomId: string;
@@ -29,15 +32,21 @@ interface SidebarState {
     snapshot: CollaborationSnapshot;
     knownSession: SessionDescriptor | null;
     drafts: readonly Draft[];
+    conduitState: ConduitState;
+    buttons: ReturnType<typeof getButtons>;
 }
 
 interface SidebarMessage {
     type:
     | "signIn"
     | "signOut"
+    | "account"
     | "showAccount"
+    | "createRoom"
     | "createSession"
+    | "joinRoom"
     | "joinSession"
+    | "leaveRoom"
     | "leaveSession"
     | "switchBranch"
     | "refresh"
@@ -116,14 +125,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             case "signOut":
                 await vscode.commands.executeCommand("conduit.signOut");
                 break;
+            case "account":
             case "showAccount":
                 await vscode.commands.executeCommand("conduit.showAccount");
+                break;
+            case "createRoom":
+                await vscode.commands.executeCommand("conduit.createRoom");
                 break;
             case "createSession":
                 await vscode.commands.executeCommand("conduit.createSession");
                 break;
+            case "joinRoom":
+                await vscode.commands.executeCommand("conduit.joinRoom");
+                break;
             case "joinSession":
                 await vscode.commands.executeCommand("conduit.joinSession");
+                break;
+            case "leaveRoom":
+                await vscode.commands.executeCommand("conduit.leaveRoom");
                 break;
             case "leaveSession":
                 await vscode.commands.executeCommand("conduit.leaveSession");
@@ -144,6 +163,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
 
     private buildPlaceholderState(snapshot = this.broadcastHub.getSnapshot()): SidebarState {
         const activeEditor = vscode.window.activeTextEditor;
+        const conduitState = getStateManager().get().state;
         return {
             authed: false,
             user: null,
@@ -153,19 +173,49 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             snapshot,
             knownSession: null,
             drafts: [],
+            conduitState,
+            buttons: getButtons(conduitState),
         };
     }
 
     private buildState(snapshot = this.broadcastHub.getSnapshot(), authState: any): SidebarState {
         const activeEditor = vscode.window.activeTextEditor;
+        const extensionState = getStateManager().get();
+        const conduitState = extensionState.state;
+        const effectiveRoom = extensionState.room
+            ? {
+                ...(snapshot.room ?? {}),
+                ...extensionState.room,
+                ownerId: snapshot.room?.ownerId ?? this.localUserId
+            }
+            : snapshot.room;
+        const effectiveSession = extensionState.session
+            ? {
+                ...(snapshot.session ?? {}),
+                ...extensionState.session,
+                roomId:
+                    effectiveRoom?.id ??
+                    snapshot.roomId ??
+                    snapshot.session?.roomId ??
+                    "",
+                participants: snapshot.session?.participants ?? [],
+                status: snapshot.session?.status ?? "active"
+            }
+            : snapshot.session;
+        const effectiveSnapshot = {
+            ...snapshot,
+            room: effectiveRoom,
+            session: effectiveSession,
+            roomId: effectiveRoom?.id ?? snapshot.roomId ?? effectiveSession?.roomId
+        };
         const user = authState.user?.id
             ? {
                 id: String(authState.user.id),
                 name: String(authState.user.name || this.localUserName),
             }
             : null;
-        const record = snapshot.session?.branch
-            ? this.branchSessionRegistry.getRestorableSession(snapshot.session.branch) ?? null
+        const record = effectiveSnapshot.session?.branch
+            ? this.branchSessionRegistry.getRestorableSession(effectiveSnapshot.session.branch) ?? null
             : null;
         const knownSession: SessionDescriptor | null = record ? {
             roomId: record.room.id,
@@ -185,9 +235,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             localUserId: this.localUserId,
             localUserName: this.localUserName,
             activeFile: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri, false) : null,
-            snapshot,
+            snapshot: effectiveSnapshot,
             knownSession,
             drafts: [],
+            conduitState,
+            buttons: getButtons(conduitState),
         };
     }
 
@@ -223,7 +275,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
         const fontUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, "media", "fonts", "Arima-font.ttf")
         );
-
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -392,6 +443,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
     button.secondary {
       background: transparent;
       color: var(--vscode-foreground);
+    }
+
+    button.primary {
+      background: var(--accent);
+    }
+
+    button.disabled {
+      opacity: 0.55;
+      pointer-events: none;
     }
 
     .section {
@@ -574,7 +634,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
     const draftsSectionEl = document.getElementById('draftsSection');
     const draftsEl = document.getElementById('drafts');
     const draftCountEl = document.getElementById('draftCount');
-
     function escapeHtml(value) {
       return String(value)
         .replace(/&/g, '&amp;')
@@ -631,17 +690,39 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       return total > 1 ? 'Admin' : 'Member';
     }
 
+    function deriveConduitState(state) {
+      if (!(state.authed && state.user)) {
+        return 'SIGNED_OUT';
+      }
+
+      const snapshot = state.snapshot || {};
+      const hasRoom = Boolean(snapshot.room);
+      const hasSession = Boolean(snapshot.session);
+
+      if (!hasRoom) {
+        return 'SIGNED_IN_NO_ROOM';
+      }
+
+      if (!hasSession) {
+        return 'IN_ROOM_NO_SESSION';
+      }
+
+      return 'IN_ROOM_IN_SESSION';
+    }
+
     function render(state) {
       const authed = Boolean(state.authed && state.user);
       const snapshot = state.snapshot || {};
       const collaborators = Array.isArray(snapshot.collaborators) ? snapshot.collaborators : [];
       const drafts = Array.isArray(state.drafts) ? state.drafts : [];
-      const roomName = snapshot.room?.name || snapshot.roomId || 'No room selected';
+      const roomName = snapshot.room?.name || 'No room selected';
       const branchName = snapshot.session?.branch || state.knownSession?.branch || 'No branch';
       const sessionId = snapshot.session?.id || state.knownSession?.sessionId || 'No session';
       const websocketUrl = snapshot.websocketUrl || ${JSON.stringify(this.websocketUrl)};
       const activeFile = state.activeFile || 'No active file';
       const accountName = state.user?.name || state.localUserName || 'Not signed in';
+      const roomRepoUrl = snapshot.room?.repoUrl || 'No room';
+      const inRoom = state.conduitState === 'IN_ROOM_NO_SESSION' || state.conduitState === 'IN_ROOM_IN_SESSION';
 
       roomTitle.textContent = authed ? roomName : 'Sign in to continue';
       subtitle.textContent = authed
@@ -655,6 +736,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             ['Current branch', branchName, 'value'],
             ['Active file', activeFile, 'value code'],
             ['Room ID', snapshot.roomId || 'No room', 'value code'],
+            ...(inRoom ? [
+              ['Room name', snapshot.room?.name || 'No room', 'value'],
+              ['Room URL', roomRepoUrl, 'value code'],
+            ] : []),
             ['Session', sessionId, 'value code'],
             ['Participants', String(collaborators.length), 'value'],
             ['Account', accountName, 'value'],
@@ -663,18 +748,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             .join('')
         : '<div class="empty" style="grid-column: 1 / -1;">Sign in to create or join a room, manage drafts, and see collaborators.</div>';
 
-      actionsEl.innerHTML = authed
-        ? [
-            ['signOut', 'Sign Out', 'secondary'],
-            ['showAccount', 'Account', 'secondary'],
-            ['createSession', 'Create Session', ''],
-            ['joinSession', 'Join Session', 'secondary'],
-            ['leaveSession', 'Leave Session', 'secondary'],
-            ['refresh', 'Refresh', 'secondary'],
-          ]
-            .map((item) => '<button data-action="' + item[0] + '"' + (item[2] ? ' class="' + item[2] + '"' : '') + '>' + item[1] + '</button>')
-            .join('')
-        : '<button data-action="signIn">Sign In</button><button class="secondary" data-action="refresh">Refresh</button>';
+      actionsEl.innerHTML = state.buttons
+        .map((btn) => {
+          const cls = [
+            btn.primary ? '' : 'secondary',
+            btn.disabled ? 'disabled' : ''
+          ].filter(Boolean).join(' ');
+          const disabledAttr = btn.disabled ? 'disabled' : '';
+          const style = btn.disabled
+            ? 'opacity:0.4;cursor:not-allowed;pointer-events:none;'
+            : '';
+          return '<button ' +
+            'data-action="' + escapeHtml(btn.id) + '" ' +
+            'class="' + cls + '" ' +
+            disabledAttr + ' ' +
+            'style="' + style + '">' +
+            escapeHtml(btn.label) +
+            '</button>';
+        })
+        .join('');
 
       participantCountEl.textContent = collaborators.length + ' collaborator' + (collaborators.length === 1 ? '' : 's');
 
@@ -731,6 +823,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
     document.addEventListener('click', (event) => {
       const button = event.target.closest('[data-action]');
       if (!button) {
+        return;
+      }
+
+      if (button.classList.contains('disabled')) {
         return;
       }
 

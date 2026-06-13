@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 
 import type { ExtensionServices } from "../extension.js";
+import { getStateManager } from "../state/ExtensionStateManager.js";
 
 /**
  * Leaves the active collaborative session.
@@ -15,25 +16,26 @@ import type { ExtensionServices } from "../extension.js";
 export const leaveSessionCommand = (
   services: ExtensionServices
 ): vscode.Disposable => {
-  return vscode.commands.registerCommand("conduit.leaveSession", async () => {
-    const state = services.wsClient.getState();
-    if (!state.session) {
-      // No active session — nothing to do
-      await services.wsClient.disconnect();
-      return;
-    }
+    return vscode.commands.registerCommand("conduit.leaveSession", async () => {
+      const stateManager = getStateManager();
+      if (stateManager.get().state !== "IN_ROOM_IN_SESSION") {
+        void vscode.window.showInformationMessage("No active session.");
+        return;
+      }
 
-    const isLast = services.wsClient.canReplaceDraftState();
+      const isLast = services.wsClient.canReplaceDraftState();
 
-    if (!isLast) {
-      // Other participants are still in the session — safe to leave silently.
-      // Their Yjs state will carry on without us.
-      await services.wsClient.disconnect();
-      services.broadcastHub.log("info", "Left collaborative session");
-      void vscode.window.showInformationMessage(
-        "You left the session. Other participants are still connected."
-      );
-      return;
+      if (!isLast) {
+        // Other participants are still in the session — safe to leave silently.
+        // Their Yjs state will carry on without us.
+        await services.wsClient.disconnect();
+        stateManager.clearSession();
+        void services.sidebarProvider.refresh();
+        services.broadcastHub.log("info", "Left collaborative session");
+        void vscode.window.showInformationMessage(
+          "You left the session. Other participants are still connected."
+        );
+        return;
     }
 
     // Last person in the room — prompt for what to do with the shared state.
@@ -82,6 +84,8 @@ export const leaveSessionCommand = (
             }
           );
           await services.wsClient.disconnect();
+          stateManager.clearSession();
+          void services.sidebarProvider.refresh();
           services.broadcastHub.log("info", "Left session and saved draft");
           // Open the restore picker immediately so the user can act on the draft
           await services.draftRestoreController.showRestorePicker();
@@ -121,6 +125,8 @@ export const leaveSessionCommand = (
             }
           );
           await services.wsClient.disconnect();
+          stateManager.clearSession();
+          void services.sidebarProvider.refresh();
           services.broadcastHub.log(
             "info",
             "Left session and committed changes"
@@ -147,6 +153,8 @@ export const leaveSessionCommand = (
 
         try {
           await services.wsClient.discardSession();
+          stateManager.clearSession();
+          void services.sidebarProvider.refresh();
           services.broadcastHub.log(
             "info",
             "Left session and discarded changes"

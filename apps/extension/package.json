@@ -32,8 +32,11 @@
     "onCommand:conduit.signIn",
     "onCommand:conduit.signOut",
     "onCommand:conduit.showAccount",
+    "onCommand:conduit.createRoom",
     "onCommand:conduit.createSession",
+    "onCommand:conduit.joinRoom",
     "onCommand:conduit.joinSession",
+    "onCommand:conduit.leaveRoom",
     "onCommand:conduit.leaveSession",
     "onCommand:conduit.restoreDrafts",
     "onCommand:conduit.switchBranch",
@@ -55,12 +58,24 @@
         "title": "conduit: Show Account"
       },
       {
+        "command": "conduit.createRoom",
+        "title": "conduit: Create Room"
+      },
+      {
         "command": "conduit.createSession",
         "title": "conduit: Create Session"
       },
       {
+        "command": "conduit.joinRoom",
+        "title": "conduit: Join Room"
+      },
+      {
         "command": "conduit.joinSession",
         "title": "conduit: Join Session"
+      },
+      {
+        "command": "conduit.leaveRoom",
+        "title": "conduit: Leave Room"
       },
       {
         "command": "conduit.leaveSession",

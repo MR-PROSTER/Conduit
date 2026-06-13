@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 
 import type { ExtensionServices } from "../extension.js";
+import { getStateManager } from "../state/ExtensionStateManager.js";
 
 export const signInCommand = (
   services: ExtensionServices
@@ -8,6 +9,11 @@ export const signInCommand = (
   return vscode.commands.registerCommand("conduit.signIn", async () => {
     try {
       const user = await services.authService.signInWithGitHub();
+      getStateManager().signIn({
+        id: user.id,
+        email: user.email ?? user.id,
+        username: user.username ?? user.email ?? user.id
+      });
       void services.sidebarProvider.refresh();
       vscode.window.showInformationMessage(
         `Signed in to Conduit as ${user.email ?? user.id}.`
@@ -26,10 +32,36 @@ export const signOutCommand = (
   services: ExtensionServices
 ): vscode.Disposable => {
   return vscode.commands.registerCommand("conduit.signOut", async () => {
-    await services.authService.signOut();
-    await services.wsClient.disconnect();
-    void services.sidebarProvider.refresh();
-    vscode.window.showInformationMessage("Signed out of Conduit.");
+    try {
+      const current = getStateManager().get();
+      if (current.state === "SIGNED_OUT") {
+        return;
+      }
+
+      if (current.state === "IN_ROOM_IN_SESSION") {
+        await vscode.commands.executeCommand("conduit.leaveSession");
+        if (getStateManager().get().state === "IN_ROOM_IN_SESSION") {
+          return;
+        }
+      }
+
+      if (current.state === "IN_ROOM_NO_SESSION") {
+        await services.wsClient.disconnect();
+        getStateManager().clearRoom();
+      }
+
+      await services.authService.signOut();
+      await services.wsClient.disconnect();
+      getStateManager().signOut();
+      void services.sidebarProvider.refresh();
+      vscode.window.showInformationMessage("Signed out of Conduit.");
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Failed to sign out of Conduit: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   });
 };
 

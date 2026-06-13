@@ -5,6 +5,7 @@ import type { Room, Session } from "@conduit/shared-types";
 import { GitService } from "@conduit/git-core";
 
 import type { ExtensionServices } from "../extension.js";
+import { getStateManager } from "../state/ExtensionStateManager.js";
 
 /**
  * Runs pre-join Git checks for a discovered session and handles any blocking
@@ -155,14 +156,34 @@ export const joinSessionCommand = (
   services: ExtensionServices
 ): vscode.Disposable => {
   return vscode.commands.registerCommand("conduit.joinSession", async () => {
+    const stateManager = getStateManager();
+    const state = stateManager.get();
+    if (state.state !== "IN_ROOM_NO_SESSION") {
+      void vscode.window.showInformationMessage(
+        "Join a room before joining a session."
+      );
+      return;
+    }
+
+    const { room: currentRoom } = state;
+    if (!currentRoom) {
+      void vscode.window.showInformationMessage(
+        "Join a room before joining a session."
+      );
+      return;
+    }
+
     const auth = await services.authService.requireState();
     const discoveredSessions = await services.wsClient.discoverSessions(
       services.websocketUrl,
       auth.accessToken
     );
+    const roomSessions = discoveredSessions.filter((entry) => {
+      return entry.room.id === currentRoom.id;
+    });
     const selectedDiscoveredSession = await vscode.window.showQuickPick(
       [
-        ...discoveredSessions.map((entry) => {
+        ...roomSessions.map((entry) => {
           return {
             label: `${entry.room.name} (${entry.session.branch})`,
             description: entry.session.id,
@@ -224,9 +245,11 @@ export const joinSessionCommand = (
             localUserId: auth.user.id,
             localUserName: auth.user.username || auth.user.email || services.localUserName,
             accessToken: auth.accessToken
-          });
-        }
+        });
+      }
       );
+      stateManager.setSession(selectedDiscoveredSession.entry.session);
+      void services.sidebarProvider.refresh();
       services.broadcastHub.log(
         "info",
         `Joined collaborative session ${selectedDiscoveredSession.entry.session.id}`
@@ -314,7 +337,7 @@ export const joinSessionCommand = (
     };
 
     // Ensure the room exists and retrieve the correct ownerId from the database
-    const room = await services.authService.createRoom(
+    const backendRoom = await services.authService.createRoom(
       roomInput,
       auth.accessToken
     );
@@ -339,7 +362,7 @@ export const joinSessionCommand = (
       },
       async () => {
         await services.wsClient.joinSession({
-          room,
+          room: backendRoom,
           session,
           websocketUrl: services.websocketUrl,
           localUserId: auth.user.id,
@@ -348,6 +371,8 @@ export const joinSessionCommand = (
         });
       }
     );
+    stateManager.setSession(session);
+    void services.sidebarProvider.refresh();
 
     services.broadcastHub.log(
       "info",

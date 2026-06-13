@@ -10,6 +10,7 @@ import { DraftRestoreController } from "./DraftRestoreController.js";
 import { LocalFallbackStore } from "./LocalFallbackStore.js";
 import { SidebarProvider } from "./SidebarProvider.js";
 import { ConduitWebSocketClient } from "./wsClient.js";
+import { getStateManager } from "./state/ExtensionStateManager.js";
 import { ApiKeyStore } from "./ai/ApiKeyStore.js";
 import { ChatPanelProvider } from "./ai/ChatPanelProvider.js";
 
@@ -61,6 +62,10 @@ export const activate = async (
         localUserName = context.globalState.get<string>("conduit.userName") ?? "Conduit User";
     }
     const authService = new AuthService(context, websocketUrl);
+    const stateManager = getStateManager();
+    context.subscriptions.push({
+        dispose: () => stateManager.dispose()
+    });
     const wsClient = new ConduitWebSocketClient(
         broadcastHub,
         branchSessionRegistry,
@@ -81,6 +86,11 @@ export const activate = async (
         localUserId,
         localUserName,
         context.extensionUri
+    );
+    context.subscriptions.push(
+        stateManager.onDidChangeState(() => {
+            void sidebarProvider.refresh();
+        })
     );
     const draftRestoreController = new DraftRestoreController(wsClient);
 
@@ -138,6 +148,7 @@ export const activate = async (
         broadcastHub,
         branchSessionRegistry,
         draftRestoreController,
+        stateManager,
         localUserName,
         websocketUrl,
         wsClient
@@ -153,15 +164,21 @@ const initializeStartup = async (services: {
     readonly broadcastHub: BroadcastHub;
     readonly branchSessionRegistry: BranchSessionRegistry;
     readonly draftRestoreController: DraftRestoreController;
+    readonly stateManager: ReturnType<typeof getStateManager>;
     readonly localUserName: string;
     readonly websocketUrl: string;
     readonly wsClient: ConduitWebSocketClient;
 }): Promise<void> => {
     try {
-        const { authService, broadcastHub, draftRestoreController, localUserName, websocketUrl, wsClient } = services;
+        const { authService, broadcastHub, draftRestoreController, stateManager, localUserName, websocketUrl, wsClient } = services;
         await wsClient.recoverLocalFallbacks();
         let auth = await authService.getState();
         if (auth.accessToken && auth.user) {
+            stateManager.signIn({
+                id: auth.user.id,
+                email: auth.user.email ?? "",
+                username: auth.user.username ?? ""
+            });
             try {
                 const user = await authService.refreshMe();
                 auth = {
@@ -200,6 +217,13 @@ const initializeStartup = async (services: {
                 accessToken: auth.accessToken
             });
             if (restored) {
+                const realtimeState = wsClient.getState();
+                if (realtimeState.room) {
+                    stateManager.setRoom(realtimeState.room);
+                }
+                if (realtimeState.session) {
+                    stateManager.setSession(realtimeState.session);
+                }
                 broadcastHub.log(
                     "info",
                     "Restored branch-scoped collaborative session"
