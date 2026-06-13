@@ -85,15 +85,15 @@ export class ChatRepository {
     return {
       id: row.id,
       threadId: row.thread_id,
-      createdBy: row.sender_id || "",
+      senderId: row.sender_id || "",
       createdAt: row.created_at,
       role: row.role,
       content: row.content || "",
+      model: row.model || undefined,
+      tokensUsed: row.tokens_used != null ? Number(row.tokens_used) : undefined,
       attachments: row.attachments || undefined,
       contextRefs: row.context_refs || undefined,
       agentSteps: row.agent_steps || undefined,
-      fileDiffs: row.file_diffs || undefined,
-      safetyBlock: row.safety_block || undefined,
     };
   }
 

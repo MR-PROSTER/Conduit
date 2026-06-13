@@ -1,48 +1,110 @@
-import * as vscode from "vscode";
+import * as vscode from 'vscode';
 
-export type AIProviderName = "anthropic" | "openai" | "groq" | "ollama";
+import type { LLMProviderName } from '@conduit/ai-core';
 
-const KEY_PREFIX = "conduit.ai.apiKey.";
-const MODEL_PREFIX = "conduit.ai.model.";
-const ACTIVE_PROVIDER_KEY = "conduit.ai.activeProvider";
-const OLLAMA_URL_KEY = "conduit.ai.ollamaUrl";
+const KEY_PREFIX = 'conduit.ai.apiKey.';
+const MODEL_PREFIX = 'conduit.ai.model.';
+const OLLAMA_URL_KEY = 'conduit.ai.ollamaUrl';
+const ACTIVE_PROVIDER_KEY = 'conduit.ai.activeProvider';
 
+/**
+ * Manages LLM provider API keys in VS Code SecretStorage.
+ * Keys are encrypted by the OS keychain and never sent to the Conduit backend.
+ */
 export class ApiKeyStore {
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  public constructor(private readonly context: vscode.ExtensionContext) {}
 
-  async getKey(provider: AIProviderName): Promise<string | undefined> {
+  public async getKey(provider: LLMProviderName): Promise<string | undefined> {
     return this.context.secrets.get(`${KEY_PREFIX}${provider}`);
   }
 
-  async setKey(provider: AIProviderName, key: string): Promise<void> {
+  public async setKey(provider: LLMProviderName, key: string): Promise<void> {
     await this.context.secrets.store(`${KEY_PREFIX}${provider}`, key);
   }
 
-  async deleteKey(provider: AIProviderName): Promise<void> {
+  public async deleteKey(provider: LLMProviderName): Promise<void> {
     await this.context.secrets.delete(`${KEY_PREFIX}${provider}`);
   }
 
-  async getOllamaUrl(): Promise<string> {
-    return this.context.globalState.get<string>(OLLAMA_URL_KEY) ?? "http://localhost:11434";
+  public async hasKey(provider: LLMProviderName): Promise<boolean> {
+    if (provider === 'ollama') return true; // No key needed
+    const key = await this.getKey(provider);
+    return key !== undefined && key.trim().length > 0;
   }
 
-  async setOllamaUrl(url: string): Promise<void> {
-    await this.context.globalState.update(OLLAMA_URL_KEY, url.trim() || "http://localhost:11434");
+  public getOllamaUrl(): string {
+    return (
+      this.context.globalState.get<string>(OLLAMA_URL_KEY) ??
+      'http://localhost:11434'
+    );
   }
 
-  async getActiveProvider(): Promise<AIProviderName> {
-    return this.context.globalState.get<AIProviderName>(ACTIVE_PROVIDER_KEY) ?? "anthropic";
+  public async setOllamaUrl(url: string): Promise<void> {
+    await this.context.globalState.update(OLLAMA_URL_KEY, url);
   }
 
-  async setActiveProvider(provider: AIProviderName): Promise<void> {
+  public getActiveProvider(): LLMProviderName {
+    return (
+      this.context.globalState.get<LLMProviderName>(ACTIVE_PROVIDER_KEY) ??
+      'anthropic'
+    );
+  }
+
+  public async setActiveProvider(provider: LLMProviderName): Promise<void> {
     await this.context.globalState.update(ACTIVE_PROVIDER_KEY, provider);
   }
 
-  async getModel(provider: AIProviderName): Promise<string | undefined> {
+  public getModel(provider: LLMProviderName): string | undefined {
     return this.context.globalState.get<string>(`${MODEL_PREFIX}${provider}`);
   }
 
-  async setModel(provider: AIProviderName, model: string): Promise<void> {
-    await this.context.globalState.update(`${MODEL_PREFIX}${provider}`, model.trim() || undefined);
+  public async setModel(
+    provider: LLMProviderName,
+    model: string
+  ): Promise<void> {
+    await this.context.globalState.update(`${MODEL_PREFIX}${provider}`, model);
+  }
+
+  /**
+   * Validate an API key by calling the provider's models endpoint.
+   * Uses a minimal HTTP fetch with just the key — no SDK instantiated.
+   */
+  public async validateKey(
+    provider: LLMProviderName,
+    key: string
+  ): Promise<boolean> {
+    try {
+      switch (provider) {
+        case 'anthropic': {
+          const res = await fetch('https://api.anthropic.com/v1/models', {
+            headers: {
+              'x-api-key': key,
+              'anthropic-version': '2023-06-01',
+            },
+          });
+          return res.ok;
+        }
+        case 'openai': {
+          const res = await fetch('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${key}` },
+          });
+          return res.ok;
+        }
+        case 'groq': {
+          const res = await fetch(
+            'https://api.groq.com/openai/v1/models',
+            { headers: { Authorization: `Bearer ${key}` } }
+          );
+          return res.ok;
+        }
+        case 'ollama':
+          return true; // No key validation needed
+      }
+    } catch (err) {
+      if (err instanceof TypeError && (err.message.includes('fetch') || err.message.includes('network'))) {
+        return true;  // offline — assume key is valid, can't check
+      }
+      return false;
+    }
   }
 }

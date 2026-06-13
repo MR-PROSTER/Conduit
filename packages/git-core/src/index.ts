@@ -1,4 +1,4 @@
-import type { Room, Session } from "../../shared-types/src/index.js";
+import type { Room, Session } from "@conduit/shared-types";
 
 export type {
   GitBranchReference,
@@ -9,19 +9,24 @@ export type {
   GitCreateBranchOptions,
   GitDiffOptions,
   GitRenamedPath,
-  GitStatus,
   GitStashPopResult,
   GitStashResult,
-  IGitService,
+  GitStatus,
+  IGitService
 } from "./IGitService.js";
-export type { GitServiceErrorCode } from "./GitService.js";
 export { GitService, GitServiceError } from "./GitService.js";
-export type { Room, Session };
+export type { GitServiceErrorCode, GitServiceOptions } from "./GitService.js";
 
-export function getRepositorySlug(room: Room): string {
+export interface GitValidationTarget {
+  readonly room: Room;
+  readonly branchName: string;
+  readonly expectedAncestorSha: string;
+}
+
+export const getRepositorySlug = (room: Room): string => {
   return `${room.name}:${room.defaultBranch}`;
-}
+};
 
-export function getSessionBaseCommitHash(session: Session): string {
+export const getSessionBaseCommitHash = (session: Session): string => {
   return session.baseCommitHash;
-}
+};

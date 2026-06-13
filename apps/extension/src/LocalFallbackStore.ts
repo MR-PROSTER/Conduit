@@ -1,62 +1,143 @@
 import * as vscode from "vscode";
+
 import type { Draft } from "@conduit/shared-types";
+import type { DraftMetadata } from "@conduit/collaboration-core";
+
+const LOCAL_FALLBACKS_KEY = "conduit.localDraftFallbacks";
+
+interface StoredLocalFallbackRecord {
+  readonly draft: Draft;
+  readonly reason: string;
+  readonly savedAt: string;
+  readonly workspacePath: string;
+}
 
 export class LocalFallbackStore {
-  private readonly globalState: vscode.Memento;
-  private readonly keyPrefix = "conduit:fallback-draft:";
-  private readonly indexKey = "conduit:fallback-draft-ids";
+  public constructor(private readonly context: vscode.ExtensionContext) {}
 
-  constructor(context: vscode.ExtensionContext) {
-    this.globalState = context.globalState;
+  public async saveFallback(
+    draft: Draft,
+    reason: string,
+    workspaceFolder: vscode.WorkspaceFolder
+  ): Promise<void> {
+    const records = this.getRecords();
+    records[draft.id] = {
+      draft,
+      reason,
+      savedAt: new Date().toISOString(),
+      workspacePath: workspaceFolder.uri.fsPath
+    };
+    await this.context.globalState.update(LOCAL_FALLBACKS_KEY, records);
   }
 
-  async save(draftId: string, draft: Draft): Promise<void> {
-    await this.globalState.update(this.getKey(draftId), draft);
-
-    const draftIds = this.getDraftIds();
-    if (!draftIds.includes(draftId)) {
-      draftIds.push(draftId);
-      await this.globalState.update(this.indexKey, draftIds);
+  public async clearFallback(draftId: string): Promise<void> {
+    const records = this.getRecords();
+    if (!(draftId in records)) {
+      return;
     }
+
+    delete records[draftId];
+    await this.context.globalState.update(LOCAL_FALLBACKS_KEY, records);
   }
 
-  get(draftId: string): Draft | undefined {
-    return this.globalState.get<Draft>(this.getKey(draftId));
-  }
+  public async recoverFallbacksForWorkspace(
+    workspaceFolder: vscode.WorkspaceFolder
+  ): Promise<readonly DraftMetadata[]> {
+    const records = this.getRecords();
+    const recovered: DraftMetadata[] = [];
+    let hasCorruption = false;
+    let changed = false;
 
-  list(): Draft[] {
-    const draftIds = this.getDraftIds();
-    const drafts: Draft[] = [];
-    for (const draftId of draftIds) {
-      const draft = this.get(draftId);
-      if (draft) {
-        drafts.push(draft);
+    for (const [draftId, record] of Object.entries(records)) {
+      if (!this.isStoredFallbackRecord(record)) {
+        delete records[draftId];
+        changed = true;
+        hasCorruption = true;
+        continue;
       }
+
+      if (record.workspacePath !== workspaceFolder.uri.fsPath) {
+        continue;
+      }
+
+      recovered.push({
+        draft: record.draft,
+        uri: vscode.Uri.joinPath(
+          workspaceFolder.uri,
+          ".conduit",
+          "draft-fallbacks",
+          `${record.draft.id}.json`
+        ),
+        source: "fallback"
+      });
     }
-    return drafts;
-  }
 
-  async remove(draftId: string): Promise<void> {
-    await this.globalState.update(this.getKey(draftId), undefined);
-
-    const draftIds = this.getDraftIds();
-    const updatedIds = draftIds.filter((id) => id !== draftId);
-    await this.globalState.update(this.indexKey, updatedIds);
-  }
-
-  async clear(): Promise<void> {
-    const draftIds = this.getDraftIds();
-    for (const draftId of draftIds) {
-      await this.globalState.update(this.getKey(draftId), undefined);
+    if (changed) {
+      await this.context.globalState.update(LOCAL_FALLBACKS_KEY, records);
     }
-    await this.globalState.update(this.indexKey, undefined);
+
+    if (hasCorruption) {
+      void vscode.window.showWarningMessage(
+        "Conduit found corrupted local draft fallback data and skipped it safely."
+      );
+    }
+
+    return recovered.sort((left, right) => {
+      return right.draft.createdAt.localeCompare(left.draft.createdAt);
+    });
   }
 
-  private getDraftIds(): string[] {
-    return this.globalState.get<string[]>(this.indexKey) || [];
+  public async hasUnresolvedFallbacks(
+    workspaceFolder: vscode.WorkspaceFolder
+  ): Promise<boolean> {
+    const fallbacks = await this.recoverFallbacksForWorkspace(workspaceFolder);
+    return fallbacks.some((fallback) => fallback.draft.status === "active");
   }
 
-  private getKey(draftId: string): string {
-    return `${this.keyPrefix}${draftId}`;
+  private getRecords(): Record<string, unknown> {
+    return (
+      this.context.globalState.get<Record<string, unknown>>(
+        LOCAL_FALLBACKS_KEY
+      ) ?? {}
+    );
+  }
+
+  private isStoredFallbackRecord(
+    candidate: unknown
+  ): candidate is StoredLocalFallbackRecord {
+    if (!candidate || typeof candidate !== "object") {
+      return false;
+    }
+
+    const record = candidate as Partial<StoredLocalFallbackRecord>;
+    return (
+      typeof record.reason === "string" &&
+      typeof record.savedAt === "string" &&
+      typeof record.workspacePath === "string" &&
+      this.isDraft(record.draft)
+    );
+  }
+
+  private isDraft(candidate: unknown): candidate is Draft {
+    if (!candidate || typeof candidate !== "object") {
+      return false;
+    }
+
+    const draft = candidate as Partial<Draft>;
+    return (
+      typeof draft.id === "string" &&
+      typeof draft.sessionId === "string" &&
+      typeof draft.roomId === "string" &&
+      typeof draft.branch === "string" &&
+      typeof draft.baseCommitHash === "string" &&
+      typeof draft.yjsState === "string" &&
+      Array.isArray(draft.filesystemOps) &&
+      Array.isArray(draft.aiEvents) &&
+      typeof draft.createdBy === "string" &&
+      typeof draft.createdAt === "string" &&
+      (draft.status === "active" ||
+        draft.status === "applied" ||
+        draft.status === "discarded")
+    );
   }
 }

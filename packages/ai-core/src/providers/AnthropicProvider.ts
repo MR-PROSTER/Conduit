@@ -1,202 +1,319 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type {
-  AgentIterationResult,
-  AgentToolDefinition,
-  ChatCompletionMessage,
-  ChatCompletionResult,
-  ILLMProvider,
-  ImageAttachment,
-  LLMRequestOptions,
-  LLMStreamChunk,
-} from "./ILLMProvider.js";
-import { getMimeTypeFromFileName, hasVisionMimeType } from "./fileTypeUtils.js";
+import Anthropic from '@anthropic-ai/sdk';
+import { isTextMimeType, isImageMimeType } from './fileTypeUtils.js';
 
-type AnthropicTool = {
-  name: string;
-  description: string;
-  input_schema: Record<string, unknown>;
-};
+import type {
+    ILLMProvider,
+    ChatCompletionMessage,
+    ChatCompletionResult,
+    AgentToolDefinition,
+    AgentIterationResult,
+    AgentToolCall,
+} from './ILLMProvider.js';
+
+/** Claude models that support vision input */
+const VISION_MODELS = new Set([
+    'claude-opus-4',
+    'claude-sonnet-4',
+    'claude-haiku-4',
+    'claude-3-5-sonnet',
+    'claude-3-5-haiku',
+    'claude-3-opus',
+    'claude-3-sonnet',
+    'claude-3-haiku',
+]);
+
+/**
+ * For binary file types (docx, xlsx, etc.), attempt to extract any
+ * human-readable text by scanning the raw bytes for UTF-8 / XML runs.
+ */
+/**
+ * For binary file types (docx, xlsx, etc.), attempt to extract any
+ * human-readable text by scanning the raw bytes for UTF-8 / XML runs.
+ */
+function tryExtractBinaryText(base64Data: string, fileName?: string): string {
+    const ext = (fileName ?? '').toLowerCase().split('.').pop() ?? '';
+    const zipTextFormats = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp']);
+    if (zipTextFormats.has(ext)) {
+        try {
+            const raw = Buffer.from(base64Data, 'base64').toString('utf-8', 0, 512_000);
+            const stripped = raw
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .replace(/&apos;/g, "'")
+                .replace(/[ \t]{2,}/g, ' ')
+                .trim();
+            if (stripped.length > 50) {
+                const truncated = stripped.length > 8_000;
+                return stripped.slice(0, 8_000) + (truncated ? '\n[... truncated]' : '');
+            }
+        } catch { /* fall through */ }
+    }
+    return '[Binary file — content cannot be displayed. Filename: ' + (fileName ?? 'unknown') + ']';
+}
+
 
 export class AnthropicProvider implements ILLMProvider {
-  readonly name = "anthropic";
-  readonly modelId: string;
-  readonly supportsVision: boolean;
+    public readonly name = 'anthropic';
+    public readonly supportsVision: boolean;
+    private readonly client: Anthropic;
 
-  private readonly client: Anthropic;
-
-  constructor(
-    apiKey: string,
-    modelId = "claude-sonnet-4-5",
-    private readonly opts: { contextWindow?: number } = {},
-  ) {
-    this.modelId = modelId;
-    this.client = new Anthropic({ apiKey });
-    this.supportsVision = true;
-  }
-
-  async checkVisionSupport(): Promise<boolean> {
-    return this.supportsVision;
-  }
-
-  async *streamChat(
-    messages: readonly ChatCompletionMessage[],
-    options: LLMRequestOptions = {},
-  ): AsyncIterable<LLMStreamChunk> {
-    const response = await (this.client.messages as any).stream(
-      this.buildMessagePayload(messages, options),
-    );
-
-    let content = "";
-    let totalTokens = 0;
-    for await (const event of response) {
-      if (event.type === "content_block_delta" && event.delta?.text) {
-        content += event.delta.text;
-        yield { content: event.delta.text, model: this.modelId };
-      }
-      if (event.type === "message_delta" && typeof event.usage?.output_tokens === "number") {
-        totalTokens = event.usage.output_tokens;
-      }
-    }
-    yield { content, totalTokens, model: this.modelId, done: true };
-  }
-
-  async runAgentIteration(
-    messages: readonly ChatCompletionMessage[],
-    tools: readonly AgentToolDefinition[] = [],
-    options: LLMRequestOptions = {},
-  ): Promise<AgentIterationResult> {
-    const response = await (this.client.messages as any).create({
-      ...this.buildMessagePayload(messages, options),
-      tools: tools.map((tool) => this.toAnthropicTool(tool)) as AnthropicTool[],
-      stream: false,
-    });
-
-    const content = this.extractText(response.content);
-    const toolCalls = this.extractToolCalls(response.content);
-    return {
-      content,
-      toolCalls,
-      stopReason: this.mapStopReason((response as any).stop_reason),
-      totalTokens:
-        Number((response as any).usage?.input_tokens ?? 0) +
-        Number((response as any).usage?.output_tokens ?? 0),
-    };
-  }
-
-  async listModels(): Promise<readonly string[]> {
-    return [this.modelId, "claude-haiku-4", "claude-opus-4"];
-  }
-
-  async validateKey(): Promise<boolean> {
-    try {
-      await (this.client as any).models.list();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async countTokens(input: string | readonly ChatCompletionMessage[]): Promise<number> {
-    const text = typeof input === "string" ? input : this.stringifyMessages(input);
-    const count = await (this.client.messages as any).countTokens({
-      model: this.modelId,
-      messages: [{ role: "user", content: text }],
-    } as any);
-    return Number((count as any).input_tokens ?? (count as any).output_tokens ?? 0);
-  }
-
-  private buildMessagePayload(
-    messages: readonly ChatCompletionMessage[],
-    options: LLMRequestOptions,
-  ) {
-    return {
-      model: this.modelId,
-      max_tokens: options.maxTokens ?? 4096,
-      system: options.systemPrompt,
-      messages: messages.map((message) => this.toAnthropicMessage(message)),
-      temperature: options.temperature,
-      signal: options.signal,
-    };
-  }
-
-  private toAnthropicMessage(message: ChatCompletionMessage): any {
-    if (message.role === "tool") {
-      return {
-        role: "user",
-        content: [{ type: "text", text: message.content }],
-      };
+    public constructor(
+        apiKey: string,
+        public readonly modelId: string = 'claude-sonnet-4-5'
+    ) {
+        this.client = new Anthropic({ apiKey });
+        // Anthropic vision support: all Claude 3+ models
+        this.supportsVision = [...VISION_MODELS].some((m) => modelId.includes(m));
     }
 
-    const content: Array<any> = [{ type: "text", text: message.content }];
-    if (message.role === "user" && message.images?.length) {
-      for (const image of message.images) {
-        content.push(this.toImageBlock(image));
-      }
+    public async checkVisionSupport(): Promise<boolean> {
+        return this.supportsVision;
     }
 
-    return {
-      role: message.role,
-      content,
-    };
-  }
+    /**
+     * Map universal ChatCompletionMessage[] to Anthropic MessageParam[].
+     *
+     * Anthropic requires:
+     * - assistant messages with tool calls → content array with text + tool_use blocks
+     * - tool results → user message with tool_result blocks (consecutive tool messages
+     *   are merged into a single user message with multiple tool_result blocks)
+     * - user messages with images → content array with image + text blocks
+     */
+    private mapMessages(messages: ChatCompletionMessage[]): Anthropic.MessageParam[] {
+        const result: Anthropic.MessageParam[] = [];
 
-  private toImageBlock(image: ImageAttachment): any {
-    const mimeType = image.mimeType || getMimeTypeFromFileName(image.fileName ?? "");
-    if (!hasVisionMimeType(mimeType)) {
-      return { type: "text", text: `[Unsupported image mime type: ${mimeType}]` };
+        for (const msg of messages) {
+            if (msg.role === 'user') {
+                if (msg.images && msg.images.length > 0) {
+                    // Multi-part message: images first, then text
+                    const contentBlocks: Anthropic.MessageParam['content'] = [];
+                    for (const img of msg.images) {
+                        if (img.mimeType === 'application/pdf') {
+                            // PDFs as document blocks
+                            contentBlocks.push({
+                                type: 'document',
+                                source: {
+                                    type: 'base64',
+                                    media_type: 'application/pdf',
+                                    data: img.data,
+                                },
+                                title: img.fileName,
+                            } as any);
+                        } else if (isImageMimeType(img.mimeType, img.fileName)) {
+                            contentBlocks.push({
+                                type: 'image',
+                                source: {
+                                    type: 'base64',
+                                    media_type: img.mimeType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+                                    data: img.data,
+                                },
+                            } as Anthropic.ImageBlockParam);
+                        } else if (isTextMimeType(img.mimeType, img.fileName)) {
+                            // Text/code files: decode base64 → readable content
+                            let decodedContent: string;
+                            try {
+                                decodedContent = Buffer.from(img.data, 'base64').toString('utf-8');
+                            } catch {
+                                decodedContent = '[Could not decode file content]';
+                            }
+                            contentBlocks.push({
+                                type: 'text',
+                                text: `[Attached file: ${img.fileName || 'file'} (type: ${img.mimeType})]\n${decodedContent}`,
+                            } as Anthropic.TextBlockParam);
+                        } else {
+                            // Binary files (docx, xlsx, zip, etc.): best-effort text extraction
+                            const fallback = tryExtractBinaryText(img.data, img.fileName);
+                            contentBlocks.push({
+                                type: 'text',
+                                text: `[Attached file: ${img.fileName || 'file'} (${img.mimeType})]
+${fallback}`,
+                            } as Anthropic.TextBlockParam);
+                        }
+                    }
+                    if (msg.content) {
+                        contentBlocks.push({ type: 'text', text: msg.content });
+                    }
+                    result.push({ role: 'user', content: contentBlocks });
+                } else {
+                    result.push({ role: 'user', content: msg.content });
+                }
+
+            } else if (msg.role === 'assistant') {
+                const contentBlocks: any[] = [];
+                if (msg.content) {
+                    contentBlocks.push({ type: 'text', text: msg.content });
+                }
+                if (msg.toolCalls && msg.toolCalls.length > 0) {
+                    for (const tc of msg.toolCalls) {
+                        contentBlocks.push({
+                            type: 'tool_use',
+                            id: tc.id,
+                            name: tc.name,
+                            input: tc.input,
+                        } as Anthropic.ToolUseBlock);
+                    }
+                }
+                result.push({
+                    role: 'assistant',
+                    content: contentBlocks.length > 0 ? contentBlocks : (msg.content ?? ''),
+                });
+
+            } else if (msg.role === 'tool') {
+                // Tool results must be in a user message as tool_result blocks.
+                // Merge consecutive tool messages into a single user message.
+                const toolResultBlock: Anthropic.ToolResultBlockParam = {
+                    type: 'tool_result',
+                    tool_use_id: msg.toolCallId,
+                    content: msg.content,
+                };
+
+                const last = result[result.length - 1];
+                let pushed = false;
+                if (
+                    last?.role === 'user' &&
+                    Array.isArray(last.content)
+                ) {
+                    const contentArray = last.content as any[];
+                    if (
+                        contentArray[0] &&
+                        typeof contentArray[0] === 'object' &&
+                        contentArray[0].type === 'tool_result'
+                    ) {
+                        contentArray.push(toolResultBlock);
+                        pushed = true;
+                    }
+                }
+                if (!pushed) {
+                    result.push({ role: 'user', content: [toolResultBlock] });
+                }
+            }
+        }
+
+        return result;
     }
-    return {
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: mimeType,
-        data: image.data,
-      },
-    };
-  }
 
-  private toAnthropicTool(tool: AgentToolDefinition): AnthropicTool {
-    return {
-      name: tool.name,
-      description: tool.description,
-      input_schema: tool.input_schema,
-    };
-  }
+    public async streamChat(
+        messages: ChatCompletionMessage[],
+        systemPrompt: string,
+        onChunk: (chunk: string) => void,
+        signal?: AbortSignal
+    ): Promise<ChatCompletionResult> {
+        let fullContent = '';
+        let totalTokens = 0;
 
-  private extractText(content: any): string {
-    if (!Array.isArray(content)) {
-      return "";
+        const stream = this.client.messages.stream(
+            {
+                model: this.modelId,
+                max_tokens: 8192,
+                system: systemPrompt,
+                messages: this.mapMessages(messages),
+            },
+            { signal }  // ← pass signal so the SDK cancels the HTTP request immediately
+        );
+
+        for await (const event of stream) {
+            if (signal?.aborted) break;
+            if (
+                event.type === 'content_block_delta' &&
+                event.delta.type === 'text_delta'
+            ) {
+                const chunk = event.delta.text;
+                fullContent += chunk;
+                onChunk(chunk);
+            }
+        }
+
+        // Skip finalMessage() on abort — awaiting it blocks until the full stream
+        // drains from the server, defeating the purpose of aborting.
+        if (!signal?.aborted) {
+            const finalMessage = await stream.finalMessage();
+            totalTokens =
+                (finalMessage.usage.input_tokens ?? 0) +
+                (finalMessage.usage.output_tokens ?? 0);
+        }
+
+        return { content: fullContent, totalTokens, model: this.modelId };
     }
-    return content
-      .filter((item) => item?.type === "text" && typeof item.text === "string")
-      .map((item) => item.text)
-      .join("");
-  }
 
-  private extractToolCalls(content: any): readonly { id: string; name: string; input: unknown }[] {
-    if (!Array.isArray(content)) {
-      return [];
-    }
-    return content
-      .filter((item) => item?.type === "tool_use")
-      .map((item) => ({
-        id: String(item.id ?? ""),
-        name: String(item.name ?? ""),
-        input: item.input,
-      }));
-  }
+    public async runAgentIteration(
+        messages: ChatCompletionMessage[],
+        systemPrompt: string,
+        tools: AgentToolDefinition[],
+        signal?: AbortSignal
+    ): Promise<AgentIterationResult> {
+        const anthropicTools: Anthropic.Tool[] = tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.input_schema as Anthropic.Tool['input_schema'],
+        }));
 
-  private mapStopReason(stopReason: string | undefined): AgentIterationResult["stopReason"] {
-    if (stopReason === "tool_use") {
-      return "tool_use";
-    }
-    if (stopReason === "max_tokens") {
-      return "max_tokens";
-    }
-    return "end_turn";
-  }
+        const response = await this.client.messages.create({
+            model: this.modelId,
+            max_tokens: 8192,
+            system: systemPrompt,
+            tools: anthropicTools,
+            messages: this.mapMessages(messages),
+        }, { signal });
 
-  private stringifyMessages(messages: readonly ChatCompletionMessage[]): string {
-    return messages.map((message) => `${message.role}: ${message.content}`).join("\n");
-  }
+        const toolCalls: AgentToolCall[] = [];
+        let textContent: string | undefined;
+
+        for (const block of response.content) {
+            if (block.type === 'text') {
+                textContent = block.text;
+            } else if (block.type === 'tool_use') {
+                toolCalls.push({
+                    id: block.id,
+                    name: block.name,
+                    input: block.input as Record<string, unknown>,
+                });
+            }
+        }
+
+        const stopReason: AgentIterationResult['stopReason'] =
+            response.stop_reason === 'tool_use'
+                ? 'tool_use'
+                : response.stop_reason === 'max_tokens'
+                    ? 'max_tokens'
+                    : 'end_turn';
+
+        const totalTokens =
+            (response.usage.input_tokens ?? 0) +
+            (response.usage.output_tokens ?? 0);
+
+        return { content: textContent, toolCalls, stopReason, totalTokens };
+    }
+
+    public async listModels(): Promise<string[]> {
+        try {
+            const models = await this.client.models.list();
+            return models.data.map((m: any) => m.id);
+        } catch {
+            return [
+                'claude-opus-4-5',
+                'claude-sonnet-4-5',
+                'claude-haiku-4-5',
+            ];
+        }
+    }
+
+    public async validateKey(): Promise<boolean> {
+        try {
+            await this.client.models.list();
+            return true;
+        } catch (err) {
+            // Network error — don't invalidate a key just because we're offline
+            if (err instanceof TypeError && err.message.toLowerCase().includes('fetch')) {
+                return true;
+            }
+            return false;
+        }
+    }
+
+    public countTokens(text: string): number {
+        return Math.ceil(text.length / 4);
+    }
 }

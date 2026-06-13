@@ -1,50 +1,45 @@
 import * as vscode from "vscode";
-import type { ExtensionServices } from "./index.js";
 
-export function switchBranchCommand(services: ExtensionServices): vscode.Disposable {
+import type { ExtensionServices } from "../extension.js";
+
+/**
+ * Reconnects the active session on a different branch scope.
+ */
+export const switchBranchCommand = (
+  services: ExtensionServices
+): vscode.Disposable => {
   return vscode.commands.registerCommand("conduit.switchBranch", async () => {
-    try {
-      const branches = await services.gitService.listBranches(false);
-
-      if (branches.length === 0) {
-        vscode.window.showInformationMessage("No git branches found.");
-        return;
-      }
-
-      const branchItems = branches.map((b) => ({
-        label: b.name,
-        description: b.current ? "Current branch" : "",
-        value: b,
-      }));
-
-      const selected = await vscode.window.showQuickPick(branchItems, {
-        title: "Switch Git Branch & Session",
-        placeHolder: "Select a branch to switch to",
-      });
-
-      if (!selected) {
-        return;
-      }
-
-      if (selected.value.current) {
-        vscode.window.showInformationMessage(`Already on branch '${selected.value.name}'.`);
-        return;
-      }
-
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Switching to branch '${selected.value.name}'...`,
-          cancellable: false,
-        },
-        async () => {
-          await services.sessionManager.switchBranch(selected.value.name);
-        }
+    const currentState = services.wsClient.getState();
+    if (
+      !currentState.session ||
+      !currentState.room ||
+      !currentState.websocketUrl
+    ) {
+      void vscode.window.showWarningMessage(
+        "No active Conduit session to switch."
       );
-
-      vscode.window.showInformationMessage(`Successfully switched to branch '${selected.value.name}'!`);
-    } catch (err: any) {
-      vscode.window.showErrorMessage(`Failed to switch branch: ${err.message}`);
+      return;
     }
+
+    const availableBranches = await services.wsClient.listBranches();
+    const branch =
+      (await vscode.window.showQuickPick(availableBranches, {
+        title: "Switch Branch Session",
+        placeHolder: currentState.session.branch
+      })) ??
+      (await vscode.window.showInputBox({
+        prompt: "New branch",
+        value: currentState.session.branch
+      }));
+    if (!branch) {
+      return;
+    }
+
+    await services.wsClient.switchBranch(branch);
+
+    services.broadcastHub.log(
+      "info",
+      `Switched collaboration scope to branch ${branch}`
+    );
   });
-}
+};
