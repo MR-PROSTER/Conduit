@@ -1,0 +1,5 @@
+   {
+     "websocketUrl": "ws://localhost:4000",
+     "backendUrl": "http://localhost:4000"
+   }
+   
