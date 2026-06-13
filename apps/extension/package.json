@@ -1,8 +1,119 @@
 {
-  "name": "@conduit/extension",
+  "name": "@codesync/extension",
   "private": true,
   "type": "module",
+  "version": "0.1.0",
+  "publisher": "codesync",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "vscode": "^1.99"
+  },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@codesync/ai-core": "workspace:*",
+    "@codesync/collaboration-core": "workspace:*",
+    "@codesync/git-core": "workspace:*",
+    "@codesync/shared-types": "workspace:*",
+    "diff": "*",
+    "lib0": "*",
+    "ws": "*",
+    "y-protocols": "*",
+    "y-websocket": "*",
+    "yjs": "*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.99.0",
+    "@types/ws": "^8.5.10"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:codesync.signIn",
+    "onCommand:codesync.signOut",
+    "onCommand:codesync.showAccount",
+    "onCommand:codesync.createSession",
+    "onCommand:codesync.joinSession",
+    "onCommand:codesync.leaveSession",
+    "onCommand:codesync.restoreDrafts",
+    "onCommand:codesync.switchBranch",
+    "onView:codesync.sidebar",
+    "onView:codesync.aiPanel"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codesync.signIn",
+        "title": "CodeSync: Sign In"
+      },
+      {
+        "command": "codesync.signOut",
+        "title": "CodeSync: Sign Out"
+      },
+      {
+        "command": "codesync.showAccount",
+        "title": "CodeSync: Show Account"
+      },
+      {
+        "command": "codesync.createSession",
+        "title": "CodeSync: Create Session"
+      },
+      {
+        "command": "codesync.joinSession",
+        "title": "CodeSync: Join Session"
+      },
+      {
+        "command": "codesync.leaveSession",
+        "title": "CodeSync: Leave Session"
+      },
+      {
+        "command": "codesync.restoreDrafts",
+        "title": "CodeSync: Restore Drafts"
+      },
+      {
+        "command": "codesync.switchBranch",
+        "title": "CodeSync: Switch Branch"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codesync",
+          "title": "CodeSync",
+          "icon": "$(sync)"
+        }
+      ]
+    },
+    "views": {
+      "codesync": [
+        {
+          "type": "webview",
+          "id": "codesync.sidebar",
+          "name": "Collaborators & Sessions"
+        },
+        {
+          "type": "webview",
+          "id": "codesync.aiPanel",
+          "name": "AI Assistant"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "CodeSync",
+      "properties": {
+        "codesync.websocketUrl": {
+          "type": "string",
+          "default": "ws://localhost:3000",
+          "description": "WebSocket URL for CodeSync backend"
+        },
+        "codesync.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "HTTP URL for CodeSync backend"
+        }
+      }
+    }
   }
 }
