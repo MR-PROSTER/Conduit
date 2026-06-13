@@ -50,7 +50,11 @@ importers:
 
   packages/collaboration-core: {}
 
-  packages/git-core: {}
+  packages/git-core:
+    dependencies:
+      '@codesync/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
 
   packages/shared-types: {}
 
