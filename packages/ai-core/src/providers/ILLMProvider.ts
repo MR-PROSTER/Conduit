@@ -70,12 +70,12 @@ export interface ILLMProvider {
   checkVisionSupport(): Promise<boolean>;
   streamChat(
     messages: readonly ChatCompletionMessage[],
-    options?: LLMRequestOptions
+    options?: LLMRequestOptions,
   ): AsyncIterable<LLMStreamChunk>;
   runAgentIteration(
     messages: readonly ChatCompletionMessage[],
     tools?: readonly AgentToolDefinition[],
-    options?: LLMRequestOptions
+    options?: LLMRequestOptions,
   ): Promise<AgentIterationResult>;
   listModels(): Promise<readonly string[]>;
   validateKey(): Promise<boolean>;

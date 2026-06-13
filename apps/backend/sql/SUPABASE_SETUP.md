@@ -5,6 +5,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 1: Create Supabase Project
+
 1. Go to [Supabase](https://supabase.com/) and sign in or sign up.
 2. Click **New Project** and select your organization.
 3. Enter a project name (e.g., `Conduit`), set a secure database password, and select a region close to you.
@@ -13,6 +14,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 2: Run the SQL File in SQL Editor
+
 1. In the Supabase Dashboard, navigate to the **SQL Editor** from the left navigation panel.
 2. Click **New query** (or **New blank query**).
 3. Copy the entire contents of `conduit_full_schema.sql` and paste it into the editor.
@@ -22,6 +24,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 3: Verify 9 Tables in Dashboard
+
 1. Go to the **Table Editor** on the left panel in Supabase.
 2. Verify that all 9 tables have been created under the `public` schema:
    1. `users`
@@ -37,6 +40,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 3b: Set Up Cloudflare R2 Bucket
+
 1. Log in to your [Cloudflare Dashboard](https://dash.cloudflare.com/).
 2. Navigate to **R2** in the left sidebar.
 3. Click **Create bucket**.
@@ -53,6 +57,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 4: Get Supabase API Keys
+
 1. In the Supabase Dashboard, go to **Project Settings** (gear icon) -> **API** in the left panel.
 2. Copy the following credentials:
    - **Project URL** (under Project API keys / URL)
@@ -62,16 +67,18 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 5: Create Backend Environment File (`apps/backend/.env`)
+
 1. Create or edit the `.env` file in the [apps/backend/](file:///Users/ajju/Desktop/Projects/Conduit/apps/backend/) directory.
 2. Configure it with your Supabase credentials and your Cloudflare R2 credentials:
+
    ```env
    PORT=4000
-   
+
    # Supabase Credentials
    SUPABASE_URL=YOUR_SUPABASE_PROJECT_URL
    SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
    SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
-   
+
    # Cloudflare R2 Credentials
    CLOUDFLARE_R2_ACCESS_KEY_ID=YOUR_R2_ACCESS_KEY_ID
    CLOUDFLARE_R2_SECRET_ACCESS_KEY=YOUR_R2_SECRET_ACCESS_KEY
@@ -82,6 +89,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 6: Configure VS Code `settings.json`
+
 1. Create or edit the `.vscode/settings.json` file at the root of the workspace.
 2. Add or update the following configuration properties:
    ```json
@@ -94,6 +102,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 7: Start Backend
+
 1. Open your terminal at the root of the project.
 2. Build and start the backend:
    ```bash
@@ -103,6 +112,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 8: Launch Extension
+
 1. In VS Code, open the **Run and Debug** view (`Ctrl+Shift+D` or `Cmd+Shift+D`).
 2. Select the configuration to launch the extension (typically named **Launch Extension** or **Extension**).
 3. Press **F5** to start a new Extension Development Host window.
@@ -110,6 +120,7 @@ Follow these steps to set up Supabase (for database), Cloudflare R2 (for file st
 ---
 
 ### Step 9: Add AI API Key in the AI Panel Settings
+
 1. In the newly launched Extension Development Host, open the **AI Panel** view/sidebar.
 2. Open the **Settings** section in the AI Panel.
 3. Add/configure your AI API Key to enable AI assistance features.

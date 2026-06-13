@@ -8,7 +8,7 @@ export type {
   ILLMProvider,
   ImageAttachment,
   LLMRequestOptions,
-  LLMStreamChunk
+  LLMStreamChunk,
 } from "./providers/ILLMProvider.js";
 export { AnthropicProvider } from "./providers/AnthropicProvider.js";
 export { GroqProvider } from "./providers/GroqProvider.js";
@@ -29,7 +29,7 @@ export function normalizePrompt(context: PromptContext): string {
     `Room: ${context.session.roomId}`,
     `Branch: ${context.session.branch}`,
     `Base commit: ${context.session.baseCommitHash}`,
-    `Prompt: ${context.prompt}`
+    `Prompt: ${context.prompt}`,
   ];
 
   if (context.draft) {

@@ -35,7 +35,7 @@ export class DraftManager {
     doc: Y.Doc,
     session: Session,
     filesystemOps: readonly FilesystemEvent[],
-    aiEvents: readonly string[]
+    aiEvents: readonly string[],
   ): Promise<Draft> {
     const encodedState = Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64");
     const draft: Draft = {
@@ -49,15 +49,15 @@ export class DraftManager {
       aiEvents,
       createdBy: session.participants[0] ?? "",
       createdAt: new Date().toISOString(),
-      status: "active"
+      status: "active",
     };
 
     const response = await this.fetcher(`${this.options.backendUrl}/drafts`, {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
       },
-      body: JSON.stringify(draft)
+      body: JSON.stringify(draft),
     });
 
     if (response.ok) {
@@ -95,7 +95,7 @@ export class DraftManager {
       hasConflict: conflictReasons.length > 0,
       conflictReasons,
       existingDraftId: existing.id,
-      incomingDraftId: incoming.id
+      incomingDraftId: incoming.id,
     };
   }
 
@@ -105,7 +105,7 @@ export class DraftManager {
       isFresh,
       isStale: !isFresh,
       draftBaseCommitHash: draft.baseCommitHash,
-      currentHead
+      currentHead,
     };
   }
 
@@ -127,9 +127,9 @@ export class DraftManager {
     await this.fetcher(`${this.options.backendUrl}/drafts/${draftId}`, {
       method: "PATCH",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
       },
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status }),
     }).catch(() => undefined);
   }
 

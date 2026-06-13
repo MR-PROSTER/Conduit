@@ -7,8 +7,5 @@
     "tsBuildInfoFile": "dist/dashboard.tsbuildinfo"
   },
   "include": ["src"],
-  "references": [
-    { "path": "../../packages/shared-types" },
-    { "path": "../../packages/ai-core" }
-  ]
+  "references": [{ "path": "../../packages/shared-types" }, { "path": "../../packages/ai-core" }]
 }

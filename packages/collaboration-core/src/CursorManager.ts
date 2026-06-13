@@ -28,7 +28,10 @@ export interface EditorDecorationTarget {
 
 export interface CursorManagerDeps {
   getEditor(filePath: string): EditorDecorationTarget | undefined;
-  createDecorationType(options: { backgroundColor: string; borderColor: string }): DecorationTypeLike;
+  createDecorationType(options: {
+    backgroundColor: string;
+    borderColor: string;
+  }): DecorationTypeLike;
 }
 
 export class CursorManager {
@@ -39,7 +42,7 @@ export class CursorManager {
 
   constructor(
     private readonly awareness: Awareness,
-    private readonly deps: CursorManagerDeps
+    private readonly deps: CursorManagerDeps,
   ) {
     this.listener = () => this.refreshFromAwareness();
     (this.awareness as any).on?.("change", this.listener);
@@ -51,7 +54,7 @@ export class CursorManager {
     (this.awareness as any).setLocalState({
       ...localState,
       filePath,
-      cursor
+      cursor,
     });
   }
 
@@ -66,8 +69,7 @@ export class CursorManager {
   }
 
   private refreshFromAwareness(): void {
-    const states = ((this.awareness as any).getStates?.() ?? new Map()).entries?.() ??
-      [];
+    const states = ((this.awareness as any).getStates?.() ?? new Map()).entries?.() ?? [];
 
     this.peerStates.clear();
     for (const [clientId, state] of states) {
@@ -80,7 +82,7 @@ export class CursorManager {
       this.peerStates.set(String(clientId), {
         userId: String(state.userId),
         filePath: String(state.filePath),
-        cursor: state.cursor as CursorPosition
+        cursor: state.cursor as CursorPosition,
       });
     }
 
@@ -111,7 +113,7 @@ export class CursorManager {
     if (!decoration) {
       decoration = this.deps.createDecorationType({
         backgroundColor: `${color}33`,
-        borderColor: color
+        borderColor: color,
       });
       this.decorations.set(peerId, decoration);
     }
@@ -130,7 +132,7 @@ export class CursorManager {
     const endCharacter = cursor.selectionEndCharacter ?? cursor.character + 1;
     return {
       start: { line: cursor.line, character: cursor.character },
-      end: { line: endLine, character: endCharacter }
+      end: { line: endLine, character: endCharacter },
     };
   }
 

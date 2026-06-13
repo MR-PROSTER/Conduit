@@ -1,13 +1,13 @@
-import { Router, Request, Response, NextFunction } from 'express';
-import { DraftRepository, DraftQuery } from './draftRepository.js';
-import { RoomPermissionService } from './permissions.js';
-import { getSupabaseClient } from './supabaseClient.js';
-import { sendError } from './authRoutes.js';
+import { Router, Request, Response, NextFunction } from "express";
+import { DraftRepository, DraftQuery } from "./draftRepository.js";
+import { RoomPermissionService } from "./permissions.js";
+import { getSupabaseClient } from "./supabaseClient.js";
+import { sendError } from "./authRoutes.js";
 
 export function createDraftRouter(
   repo: DraftRepository,
   authenticator?: any,
-  permissions?: RoomPermissionService
+  permissions?: RoomPermissionService,
 ): Router {
   const router = Router();
 
@@ -19,7 +19,7 @@ export function createDraftRouter(
     }
     const supabase = getSupabaseClient();
     if (!supabase) {
-      throw new Error('Supabase client not initialized');
+      throw new Error("Supabase client not initialized");
     }
     return new RoomPermissionService(supabase);
   };
@@ -41,7 +41,7 @@ export function createDraftRouter(
   router.use(requireAuth);
 
   // POST /drafts (auth) → create draft, 201 { draft }
-  router.post('/drafts', async (req: Request, res: Response) => {
+  router.post("/drafts", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const {
@@ -53,7 +53,7 @@ export function createDraftRouter(
         filesystemOps,
         aiEvents,
         lineage,
-        ownerId
+        ownerId,
       } = req.body;
 
       const service = getPermissionService();
@@ -71,7 +71,7 @@ export function createDraftRouter(
         aiEvents,
         createdBy: user.id,
         ownerId: ownerId || user.id,
-        lineage
+        lineage,
       });
 
       res.status(201).json({ draft });
@@ -81,7 +81,7 @@ export function createDraftRouter(
   });
 
   // GET /drafts (auth) → list drafts by query params (roomId, branch, status, sessionId)
-  router.get('/drafts', async (req: Request, res: Response) => {
+  router.get("/drafts", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const { roomId, branch, status, sessionId } = req.query as any;
@@ -96,7 +96,7 @@ export function createDraftRouter(
         roomId,
         branch,
         status,
-        sessionId
+        sessionId,
       };
 
       const drafts = await repo.listDrafts(query);
@@ -107,7 +107,7 @@ export function createDraftRouter(
   });
 
   // GET /drafts/:id (auth) → single draft with yjsState
-  router.get('/drafts/:id', async (req: Request, res: Response) => {
+  router.get("/drafts/:id", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const draftId = req.params.id as string;
@@ -125,7 +125,7 @@ export function createDraftRouter(
   });
 
   // PATCH /drafts/:id (auth) → update status/lineage
-  router.patch('/drafts/:id', async (req: Request, res: Response) => {
+  router.patch("/drafts/:id", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const draftId = req.params.id as string;
@@ -141,7 +141,7 @@ export function createDraftRouter(
         lineage,
         yjsState,
         filesystemOps,
-        aiEvents
+        aiEvents,
       });
 
       res.json({ draft: updated });
@@ -151,7 +151,7 @@ export function createDraftRouter(
   });
 
   // DELETE /drafts/:id (auth, owner only) → delete
-  router.delete('/drafts/:id', async (req: Request, res: Response) => {
+  router.delete("/drafts/:id", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const draftId = req.params.id as string;
@@ -165,7 +165,9 @@ export function createDraftRouter(
       const isRoomOwner = access.isOwner;
 
       if (!isCreator && !isRoomOwner) {
-        return res.status(403).json({ error: 'Only the draft creator or room owner can delete this draft' });
+        return res
+          .status(403)
+          .json({ error: "Only the draft creator or room owner can delete this draft" });
       }
 
       await repo.deleteDraft(draftId);

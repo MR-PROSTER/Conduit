@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 export interface SupabaseConfig {
   url: string;
@@ -14,8 +14,8 @@ export function initializeSupabase(config: SupabaseConfig): SupabaseClient {
   clientInstance = createClient(config.url, config.serviceRoleKey, {
     auth: {
       persistSession: false,
-      autoRefreshToken: false
-    }
+      autoRefreshToken: false,
+    },
   });
   return clientInstance;
 }

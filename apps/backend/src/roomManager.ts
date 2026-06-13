@@ -16,7 +16,10 @@ export class RoomManager {
    * Registers a connection to a room. If the room doesn't exist, it is created.
    * Otherwise, its connection count is incremented.
    */
-  register(roomKey: string, session: { roomId: string; branch: string; sessionId: string }): ManagedRoom {
+  register(
+    roomKey: string,
+    session: { roomId: string; branch: string; sessionId: string },
+  ): ManagedRoom {
     const existing = this.activeRooms.get(roomKey);
     if (existing) {
       existing.connectionCount++;
@@ -28,7 +31,7 @@ export class RoomManager {
       roomKey,
       session,
       connectionCount: 1,
-      lastTouchedAt: new Date()
+      lastTouchedAt: new Date(),
     };
     this.activeRooms.set(roomKey, newRoom);
     return newRoom;

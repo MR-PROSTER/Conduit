@@ -42,7 +42,10 @@ export class FileManager {
 
   private readonly bindings = new Map<string, FileBinding>();
 
-  constructor(private readonly workspaceRoot: string, doc: Y.Doc = new Y.Doc()) {
+  constructor(
+    private readonly workspaceRoot: string,
+    doc: Y.Doc = new Y.Doc(),
+  ) {
     this.doc = doc;
     this.files = this.doc.getMap<Y.Text>("files");
   }
@@ -56,7 +59,7 @@ export class FileManager {
       editor,
       dispose: () => undefined,
       updatingFromYjs: false,
-      updatingFromEditor: false
+      updatingFromEditor: false,
     };
 
     const syncEditor = async () => {
@@ -100,7 +103,7 @@ export class FileManager {
       editor.onDidChangeTextDocument?.(syncYjs) ??
       editor.onDidChange?.(syncYjs) ??
       ({
-        dispose: () => undefined
+        dispose: () => undefined,
       } as DisposableLike);
 
     state.dispose = () => {
@@ -161,7 +164,7 @@ export class FileManager {
         const absolutePath = path.join(this.workspaceRoot, filePath);
         await mkdir(path.dirname(absolutePath), { recursive: true });
         await writeFile(absolutePath, text.toString(), "utf8");
-      })
+      }),
     );
   }
 
@@ -200,7 +203,7 @@ export class FileManager {
     const lastCharacter = lines[lastLine]?.length ?? 0;
     return {
       start: { line: 0, character: 0 },
-      end: { line: lastLine, character: lastCharacter }
+      end: { line: lastLine, character: lastCharacter },
     };
   }
 }

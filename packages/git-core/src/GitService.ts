@@ -11,7 +11,7 @@ import type {
   GitStatus,
   GitStashPopResult,
   GitStashResult,
-  IGitService
+  IGitService,
 } from "./IGitService.js";
 
 const execFileAsync = promisify(execFile);
@@ -34,7 +34,7 @@ export class GitServiceError extends Error {
     code: GitServiceErrorCode,
     workspaceRoot: string,
     message?: string,
-    details: { stdout?: string; stderr?: string; exitCode?: number } = {}
+    details: { stdout?: string; stderr?: string; exitCode?: number } = {},
   ) {
     super(message ?? `Git command failed in ${workspaceRoot}`);
     this.name = "GitServiceError";
@@ -70,14 +70,14 @@ export class GitService implements IGitService {
   async getCurrentBranch(): Promise<GitCheckoutResult> {
     const [branchOutput, head] = await Promise.all([
       this.execGit(["rev-parse", "--abbrev-ref", "HEAD"]),
-      this.getHead()
+      this.getHead(),
     ]);
     const branch = branchOutput.stdout.trim();
     const detached = branch === "HEAD";
     return {
       branch,
       head,
-      detached
+      detached,
     };
   }
 
@@ -92,7 +92,7 @@ export class GitService implements IGitService {
         cwd: this.workspaceRoot,
         encoding: "utf8",
         windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 10 * 1024 * 1024,
       });
       return true;
     } catch (error) {
@@ -106,7 +106,7 @@ export class GitService implements IGitService {
   async getStatus(): Promise<GitStatus> {
     const [statusResult, head] = await Promise.all([
       this.execGit(["status", "--porcelain=v2", "-b", "--untracked-files=all"]),
-      this.getHead()
+      this.getHead(),
     ]);
 
     const status = this.parseStatus(statusResult.stdout, head);
@@ -118,7 +118,7 @@ export class GitService implements IGitService {
       this.execGit(["branch", "--format=%(refname:short)\t%(HEAD)"]),
       includeRemote
         ? this.execGit(["branch", "-r", "--format=%(refname:short)\t%(HEAD)"])
-        : Promise.resolve({ stdout: "", stderr: "" })
+        : Promise.resolve({ stdout: "", stderr: "" }),
     ]);
 
     const branches: GitBranchReference[] = [];
@@ -138,7 +138,7 @@ export class GitService implements IGitService {
         throw new GitServiceError(
           "DIRTY_WORKING_TREE",
           this.workspaceRoot,
-          "Working tree has uncommitted changes"
+          "Working tree has uncommitted changes",
         );
       }
     }
@@ -170,7 +170,7 @@ export class GitService implements IGitService {
     return {
       created,
       stashRef: created ? "stash@{0}" : "",
-      message: message ?? ""
+      message: message ?? "",
     };
   }
 
@@ -182,7 +182,7 @@ export class GitService implements IGitService {
         applied: true,
         dropped: true,
         conflicts: [],
-        output
+        output,
       };
     } catch (error) {
       const normalized = this.normalizeError(error);
@@ -192,7 +192,7 @@ export class GitService implements IGitService {
           applied: true,
           dropped: false,
           conflicts: this.parseConflicts(output),
-          output
+          output,
         };
       }
       throw normalized;
@@ -231,7 +231,10 @@ export class GitService implements IGitService {
     return stdout;
   }
 
-  async createBranch(name: string, options: GitCreateBranchOptions = {}): Promise<GitBranchReference> {
+  async createBranch(
+    name: string,
+    options: GitCreateBranchOptions = {},
+  ): Promise<GitBranchReference> {
     const { startPoint = "HEAD", checkout = true, force = false } = options;
     const args = checkout ? ["checkout", force ? "-B" : "-b", name, startPoint] : ["branch"];
 
@@ -247,7 +250,7 @@ export class GitService implements IGitService {
     return {
       name,
       current,
-      remote: false
+      remote: false,
     };
   }
 
@@ -278,7 +281,7 @@ export class GitService implements IGitService {
         cwd: this.workspaceRoot,
         encoding: "utf8",
         windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 10 * 1024 * 1024,
       })) as ExecResult;
       return result;
     } catch (error) {
@@ -294,41 +297,42 @@ export class GitService implements IGitService {
     const stdout = this.getErrorOutput(error, "stdout");
     const stderr = this.getErrorOutput(error, "stderr");
     const exitCode = this.getErrorStatus(error);
-    const message = `${stderr || stdout || (error instanceof Error ? error.message : "Git command failed")}`.trim();
+    const message =
+      `${stderr || stdout || (error instanceof Error ? error.message : "Git command failed")}`.trim();
 
     if (this.isNotGitRepo(stderr, stdout)) {
       return new GitServiceError("NOT_A_GIT_REPO", this.workspaceRoot, message, {
         stdout,
         stderr,
-        exitCode
+        exitCode,
       });
     }
     if (this.isDirtyWorkingTree(stderr, stdout)) {
       return new GitServiceError("DIRTY_WORKING_TREE", this.workspaceRoot, message, {
         stdout,
         stderr,
-        exitCode
+        exitCode,
       });
     }
     if (this.isMergeConflict(stderr, stdout)) {
       return new GitServiceError("MERGE_CONFLICT", this.workspaceRoot, message, {
         stdout,
         stderr,
-        exitCode
+        exitCode,
       });
     }
     if (this.isBranchNotFound(stderr, stdout)) {
       return new GitServiceError("BRANCH_NOT_FOUND", this.workspaceRoot, message, {
         stdout,
         stderr,
-        exitCode
+        exitCode,
       });
     }
 
     return new GitServiceError("COMMAND_FAILED", this.workspaceRoot, message, {
       stdout,
       stderr,
-      exitCode
+      exitCode,
     });
   }
 
@@ -344,7 +348,7 @@ export class GitService implements IGitService {
 
   private isDirtyWorkingTree(stderr: string, stdout: string): boolean {
     return /would be overwritten by checkout|local changes to the following files would be overwritten|please commit your changes or stash them before you switch branches/i.test(
-      `${stderr}\n${stdout}`
+      `${stderr}\n${stdout}`,
     );
   }
 
@@ -354,13 +358,14 @@ export class GitService implements IGitService {
 
   private isBranchNotFound(stderr: string, stdout: string): boolean {
     return /did not match any file\(s\) known to git|unknown revision|ambiguous argument|branch .* not found|couldn't find remote ref/i.test(
-      `${stderr}\n${stdout}`
+      `${stderr}\n${stdout}`,
     );
   }
 
   private parseStatus(output: string, head: string): GitStatus {
     const lines = output.split(/\r?\n/).filter((line) => line.length > 0);
-    const branchLine = lines.find((line) => line.startsWith("# branch.head ")) ?? "# branch.head detached";
+    const branchLine =
+      lines.find((line) => line.startsWith("# branch.head ")) ?? "# branch.head detached";
     const branch = branchLine.slice("# branch.head ".length).trim();
     const detached = branch === "detached";
 
@@ -396,7 +401,7 @@ export class GitService implements IGitService {
       deleted,
       untracked,
       conflicted,
-      renamed
+      renamed,
     };
   }
 
@@ -406,7 +411,7 @@ export class GitService implements IGitService {
       return {
         staged: code[0] !== ".",
         modified: code[1] !== ".",
-        deleted: code[0] === "D" || code[1] === "D"
+        deleted: code[0] === "D" || code[1] === "D",
       };
     }
     if (line.startsWith("2 ")) {
@@ -414,20 +419,20 @@ export class GitService implements IGitService {
       return {
         staged: code[0] !== ".",
         modified: code[1] !== ".",
-        deleted: code[0] === "D" || code[1] === "D"
+        deleted: code[0] === "D" || code[1] === "D",
       };
     }
     if (line.startsWith("u ")) {
       return {
         staged: true,
         modified: true,
-        deleted: false
+        deleted: false,
       };
     }
     return {
       staged: false,
       modified: false,
-      deleted: false
+      deleted: false,
     };
   }
 
@@ -442,7 +447,7 @@ export class GitService implements IGitService {
         return {
           name,
           current: marker.trim() === "*",
-          remote
+          remote,
         };
       });
   }

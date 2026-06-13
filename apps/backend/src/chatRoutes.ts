@@ -1,8 +1,8 @@
-import { Router, Request, Response, NextFunction } from 'express';
-import { ChatRepository } from './chatRepository.js';
-import { RoomPermissionService } from './permissions.js';
-import { getSupabaseClient } from './supabaseClient.js';
-import { sendError } from './authRoutes.js';
+import { Router, Request, Response, NextFunction } from "express";
+import { ChatRepository } from "./chatRepository.js";
+import { RoomPermissionService } from "./permissions.js";
+import { getSupabaseClient } from "./supabaseClient.js";
+import { sendError } from "./authRoutes.js";
 
 export function createChatRouter(repo: ChatRepository, authenticator?: any): Router {
   const router = Router();
@@ -14,7 +14,7 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
     }
     const supabase = getSupabaseClient();
     if (!supabase) {
-      throw new Error('Supabase client not initialized');
+      throw new Error("Supabase client not initialized");
     }
     return new RoomPermissionService(supabase);
   };
@@ -36,7 +36,7 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
   router.use(requireAuth);
 
   // POST /chat/threads → create thread
-  router.post('/chat/threads', async (req: Request, res: Response) => {
+  router.post("/chat/threads", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const { sessionId, type, name, forkedFromMessageId } = req.body;
@@ -45,16 +45,16 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
       // If session is provided, verify room permission first
       if (sessionId) {
         const supabase = getSupabaseClient();
-        if (!supabase) throw new Error('Supabase client not initialized');
+        if (!supabase) throw new Error("Supabase client not initialized");
 
         const { data: sessionData, error: sessionError } = await supabase
-          .from('sessions')
-          .select('room_id')
-          .eq('id', sessionId)
+          .from("sessions")
+          .select("room_id")
+          .eq("id", sessionId)
           .maybeSingle();
 
         if (sessionError || !sessionData) {
-          return res.status(404).json({ error: 'Session not found' });
+          return res.status(404).json({ error: "Session not found" });
         }
 
         await service.assertActiveRoomAccess(user.id, sessionData.room_id);
@@ -65,7 +65,7 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
         type,
         name,
         forkedFromMessageId,
-        createdBy: user.id
+        createdBy: user.id,
       });
 
       res.status(201).json({ thread });
@@ -75,28 +75,28 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
   });
 
   // GET /chat/threads?sessionId=... → list threads
-  router.get('/chat/threads', async (req: Request, res: Response) => {
+  router.get("/chat/threads", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const { sessionId } = req.query as any;
 
       if (!sessionId) {
-        return res.status(400).json({ error: 'sessionId query parameter is required' });
+        return res.status(400).json({ error: "sessionId query parameter is required" });
       }
 
       const service = getPermissionService();
       const supabase = getSupabaseClient();
-      if (!supabase) throw new Error('Supabase client not initialized');
+      if (!supabase) throw new Error("Supabase client not initialized");
 
       // Verify user has access to the session
       const { data: sessionData, error: sessionError } = await supabase
-        .from('sessions')
-        .select('room_id')
-        .eq('id', sessionId)
+        .from("sessions")
+        .select("room_id")
+        .eq("id", sessionId)
         .maybeSingle();
 
       if (sessionError || !sessionData) {
-        return res.status(404).json({ error: 'Session not found' });
+        return res.status(404).json({ error: "Session not found" });
       }
 
       await service.assertActiveRoomAccess(user.id, sessionData.room_id);
@@ -109,21 +109,23 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
   });
 
   // GET /chat/threads/:id/messages?cursor=... → paginated messages
-  router.get('/chat/threads/:id/messages', async (req: Request, res: Response) => {
+  router.get("/chat/threads/:id/messages", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const threadId = req.params.id as string;
       const cursor = req.query.cursor as string | undefined;
 
       const supabase = getSupabaseClient();
-      if (!supabase) throw new Error('Supabase client not initialized');
+      if (!supabase) throw new Error("Supabase client not initialized");
 
       // Check access permission via Postgres RPC function `is_thread_member`
-      const { data: isMember, error: accessError } = await supabase
-        .rpc('is_thread_member', { p_thread_id: threadId, p_user_id: user.id });
+      const { data: isMember, error: accessError } = await supabase.rpc("is_thread_member", {
+        p_thread_id: threadId,
+        p_user_id: user.id,
+      });
 
       if (accessError || !isMember) {
-        return res.status(403).json({ error: 'You do not have access to this chat thread' });
+        return res.status(403).json({ error: "You do not have access to this chat thread" });
       }
 
       const result = await repo.getMessages(threadId, { cursor, limit: 50 });
@@ -134,19 +136,21 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
   });
 
   // POST /chat/threads/:id/messages → append message
-  router.post('/chat/threads/:id/messages', async (req: Request, res: Response) => {
+  router.post("/chat/threads/:id/messages", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const threadId = req.params.id as string;
       const supabase = getSupabaseClient();
-      if (!supabase) throw new Error('Supabase client not initialized');
+      if (!supabase) throw new Error("Supabase client not initialized");
 
       // Check access permission via Postgres RPC function `is_thread_member`
-      const { data: isMember, error: accessError } = await supabase
-        .rpc('is_thread_member', { p_thread_id: threadId, p_user_id: user.id });
+      const { data: isMember, error: accessError } = await supabase.rpc("is_thread_member", {
+        p_thread_id: threadId,
+        p_user_id: user.id,
+      });
 
       if (accessError || !isMember) {
-        return res.status(403).json({ error: 'You do not have access to this chat thread' });
+        return res.status(403).json({ error: "You do not have access to this chat thread" });
       }
 
       const {
@@ -158,17 +162,17 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
         agentSteps,
         attachments,
         fileDiffs,
-        safetyBlock
+        safetyBlock,
       } = req.body;
 
       if (!role) {
-        return res.status(400).json({ error: 'role is required' });
+        return res.status(400).json({ error: "role is required" });
       }
 
       const message = await repo.appendMessage({
         threadId,
         role,
-        content: content || '',
+        content: content || "",
         model,
         tokensUsed,
         contextRefs,
@@ -176,7 +180,7 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
         attachments,
         fileDiffs,
         safetyBlock,
-        senderId: user.id
+        senderId: user.id,
       });
 
       res.status(201).json({ message });

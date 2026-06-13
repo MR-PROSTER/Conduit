@@ -1,6 +1,6 @@
-import * as Y from 'yjs';
+import * as Y from "yjs";
 // @ts-ignore
-import { docs as yDocs, setupWSConnection as ySetupWSConnection } from 'y-websocket/bin/utils';
+import { docs as yDocs, setupWSConnection as ySetupWSConnection } from "y-websocket/bin/utils";
 
 // Export the global document store keyed by roomKey
 export const docs = yDocs as Map<string, Y.Doc>;

@@ -4,7 +4,7 @@ import type {
   ChatCompletionMessage,
   ILLMProvider,
   LLMRequestOptions,
-  LLMStreamChunk
+  LLMStreamChunk,
 } from "./ILLMProvider.js";
 
 export class OllamaProvider implements ILLMProvider {
@@ -14,7 +14,7 @@ export class OllamaProvider implements ILLMProvider {
 
   constructor(
     private readonly baseUrl: string,
-    modelId = "llama3.2"
+    modelId = "llama3.2",
   ) {
     this.modelId = modelId;
     this.supportsVision = false;
@@ -26,12 +26,12 @@ export class OllamaProvider implements ILLMProvider {
 
   async *streamChat(
     messages: readonly ChatCompletionMessage[],
-    options: LLMRequestOptions = {}
+    options: LLMRequestOptions = {},
   ): AsyncIterable<LLMStreamChunk> {
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
       },
       body: JSON.stringify({
         model: this.modelId,
@@ -39,10 +39,10 @@ export class OllamaProvider implements ILLMProvider {
         stream: true,
         options: {
           temperature: options.temperature,
-          num_predict: options.maxTokens
-        }
+          num_predict: options.maxTokens,
+        },
       }),
-      signal: options.signal
+      signal: options.signal,
     });
 
     if (!response.ok || !response.body) {
@@ -77,7 +77,7 @@ export class OllamaProvider implements ILLMProvider {
             content,
             totalTokens: Number(event?.eval_count ?? 0),
             model: this.modelId,
-            done: true
+            done: true,
           };
         }
       }
@@ -87,12 +87,12 @@ export class OllamaProvider implements ILLMProvider {
   async runAgentIteration(
     messages: readonly ChatCompletionMessage[],
     tools: readonly AgentToolDefinition[] = [],
-    options: LLMRequestOptions = {}
+    options: LLMRequestOptions = {},
   ): Promise<AgentIterationResult> {
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
       },
       body: JSON.stringify({
         model: this.modelId,
@@ -102,16 +102,16 @@ export class OllamaProvider implements ILLMProvider {
           function: {
             name: tool.name,
             description: tool.description,
-            parameters: tool.input_schema
-          }
+            parameters: tool.input_schema,
+          },
         })),
         stream: false,
         options: {
           temperature: options.temperature,
-          num_predict: options.maxTokens
-        }
+          num_predict: options.maxTokens,
+        },
       }),
-      signal: options.signal
+      signal: options.signal,
     });
 
     if (!response.ok) {
@@ -123,8 +123,13 @@ export class OllamaProvider implements ILLMProvider {
     return {
       content: String(payload?.message?.content ?? ""),
       toolCalls,
-      stopReason: toolCalls.length > 0 ? "tool_use" : payload?.done_reason === "length" ? "max_tokens" : "end_turn",
-      totalTokens: Number(payload?.eval_count ?? 0)
+      stopReason:
+        toolCalls.length > 0
+          ? "tool_use"
+          : payload?.done_reason === "length"
+            ? "max_tokens"
+            : "end_turn",
+      totalTokens: Number(payload?.eval_count ?? 0),
     };
   }
 
@@ -158,16 +163,19 @@ export class OllamaProvider implements ILLMProvider {
       const response = await fetch(`${this.baseUrl}/api/show`, {
         method: "POST",
         headers: {
-          "content-type": "application/json"
+          "content-type": "application/json",
         },
-        body: JSON.stringify({ name: this.modelId })
+        body: JSON.stringify({ name: this.modelId }),
       });
       if (!response.ok) {
         return false;
       }
       const payload = await response.json();
       const modalities = payload?.modality ?? payload?.modalities;
-      return Array.isArray(modalities) && modalities.some((value: unknown) => String(value).toLowerCase() === "vision");
+      return (
+        Array.isArray(modalities) &&
+        modalities.some((value: unknown) => String(value).toLowerCase() === "vision")
+      );
     } catch {
       return false;
     }
@@ -183,7 +191,7 @@ export class OllamaProvider implements ILLMProvider {
         mapped.push({
           role: "tool",
           content: message.content,
-          tool_call_id: message.toolCallId
+          tool_call_id: message.toolCallId,
         });
         continue;
       }
@@ -192,14 +200,16 @@ export class OllamaProvider implements ILLMProvider {
     return mapped;
   }
 
-  private extractToolCalls(toolCalls: any): readonly { id: string; name: string; input: unknown }[] {
+  private extractToolCalls(
+    toolCalls: any,
+  ): readonly { id: string; name: string; input: unknown }[] {
     if (!Array.isArray(toolCalls)) {
       return [];
     }
     return toolCalls.map((toolCall) => ({
       id: String(toolCall.id ?? ""),
       name: String(toolCall.function?.name ?? ""),
-      input: this.safeJsonParse(toolCall.function?.arguments)
+      input: this.safeJsonParse(toolCall.function?.arguments),
     }));
   }
 
@@ -215,8 +225,6 @@ export class OllamaProvider implements ILLMProvider {
   }
 
   private stringifyMessages(messages: readonly ChatCompletionMessage[]): string {
-    return messages
-      .map((message) => `${message.role}: ${message.content}`)
-      .join("\n");
+    return messages.map((message) => `${message.role}: ${message.content}`).join("\n");
   }
 }

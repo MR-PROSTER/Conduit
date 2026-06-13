@@ -26,7 +26,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   ".webp": "image/webp",
   ".xml": "application/xml",
   ".yaml": "text/yaml",
-  ".yml": "text/yaml"
+  ".yml": "text/yaml",
 };
 
 export function getMimeTypeFromFileName(fileName: string): string {

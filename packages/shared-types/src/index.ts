@@ -4,7 +4,7 @@ export type {
   AgentEdit,
   AgentMemory,
   AgentObservation,
-  FileMemoryEntry
+  FileMemoryEntry,
 } from "./AgentMemory.js";
 export type {
   AgentStep,
@@ -14,7 +14,7 @@ export type {
   DiffHunk,
   DiffLine,
   FileDiff,
-  SafetyBlock
+  SafetyBlock,
 } from "./ChatMessage.js";
 export type { ChatThread } from "./ChatThread.js";
 export type { Draft } from "./Draft.js";
@@ -23,7 +23,7 @@ export type {
   FileDeleteEvent,
   FileMoveEvent,
   FileRenameEvent,
-  FilesystemEvent
+  FilesystemEvent,
 } from "./FilesystemEvent.js";
 export type { Room } from "./Room.js";
 export type { Session } from "./Session.js";

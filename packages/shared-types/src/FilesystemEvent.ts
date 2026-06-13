@@ -21,8 +21,4 @@ export interface FileMoveEvent {
   newPath: string;
 }
 
-export type FilesystemEvent =
-  | FileCreateEvent
-  | FileDeleteEvent
-  | FileRenameEvent
-  | FileMoveEvent;
+export type FilesystemEvent = FileCreateEvent | FileDeleteEvent | FileRenameEvent | FileMoveEvent;

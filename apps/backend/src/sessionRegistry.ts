@@ -1,4 +1,4 @@
-import { IncomingMessage } from 'http';
+import { IncomingMessage } from "http";
 
 export interface SessionDescriptor {
   roomId: string;
@@ -29,18 +29,18 @@ export interface SessionAuthenticator {
  * Extracts a room key from a request URL, stripping query parameters and any configured path prefix.
  */
 export function extractRoomKey(urlStr: string, pathPrefix?: string): string {
-  const url = new URL(urlStr, 'http://localhost');
+  const url = new URL(urlStr, "http://localhost");
   let pathname = url.pathname;
 
   if (pathPrefix) {
-    const prefix = pathPrefix.startsWith('/') ? pathPrefix : '/' + pathPrefix;
+    const prefix = pathPrefix.startsWith("/") ? pathPrefix : "/" + pathPrefix;
     if (pathname.startsWith(prefix)) {
       pathname = pathname.substring(prefix.length);
     }
   }
 
   // Remove leading and trailing slashes
-  pathname = pathname.replace(/^\/+|\/+$/g, '');
+  pathname = pathname.replace(/^\/+|\/+$/g, "");
   return pathname;
 }
 
@@ -49,7 +49,7 @@ export class AnonymousSessionAuthenticator implements SessionAuthenticator {
 
   async authenticate(request: IncomingMessage): Promise<SessionRequestContext> {
     if (!request.url) {
-      throw new Error('Request URL is missing');
+      throw new Error("Request URL is missing");
     }
 
     const roomKey = extractRoomKey(request.url, this.pathPrefix);
@@ -57,21 +57,21 @@ export class AnonymousSessionAuthenticator implements SessionAuthenticator {
     // Parse roomKey: "roomId:branch:sessionId"
     let descriptor: SessionDescriptor;
     try {
-      const parts = roomKey.split(':');
+      const parts = roomKey.split(":");
       if (parts.length < 3) {
-        throw new Error('Invalid room key structure');
+        throw new Error("Invalid room key structure");
       }
       const roomId = parts[0];
       const sessionId = parts[parts.length - 1];
-      const branch = parts.slice(1, parts.length - 1).join(':');
+      const branch = parts.slice(1, parts.length - 1).join(":");
 
       descriptor = { roomId, branch, sessionId };
     } catch (err) {
       // Fallback values if key cannot be parsed
       descriptor = {
-        roomId: '00000000-0000-0000-0000-000000000000',
-        branch: 'main',
-        sessionId: '00000000-0000-0000-0000-000000000000'
+        roomId: "00000000-0000-0000-0000-000000000000",
+        branch: "main",
+        sessionId: "00000000-0000-0000-0000-000000000000",
       };
     }
 
@@ -80,11 +80,11 @@ export class AnonymousSessionAuthenticator implements SessionAuthenticator {
       descriptor,
       auth: {
         user: {
-          id: 'anonymous',
-          email: 'anonymous@conduit.local',
-          username: 'Anonymous'
-        }
-      }
+          id: "anonymous",
+          email: "anonymous@conduit.local",
+          username: "Anonymous",
+        },
+      },
     };
   }
 }

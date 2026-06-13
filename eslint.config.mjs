@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/*.tsbuildinfo", "**/node_modules/**"]
+    ignores: ["**/dist/**", "**/*.tsbuildinfo", "**/node_modules/**"],
   },
   ...tseslint.configs.recommended,
   {
@@ -11,15 +11,15 @@ export default tseslint.config(
     languageOptions: {
       globals: {
         ...globals.node,
-        ...globals.browser
-      }
+        ...globals.browser,
+      },
     },
     rules: {
-      "@typescript-eslint/consistent-type-imports": "error"
-    }
+      "@typescript-eslint/consistent-type-imports": "error",
+    },
   },
   {
     files: ["**/*.{js,mjs,cjs}"],
-    rules: {}
-  }
+    rules: {},
+  },
 );

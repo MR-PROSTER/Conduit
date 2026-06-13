@@ -1,10 +1,13 @@
-import { SupabaseClient } from '@supabase/supabase-js';
-import type { Room } from '@codesync/shared-types';
+import { SupabaseClient } from "@supabase/supabase-js";
+import type { Room } from "@codesync/shared-types";
 
 export class PermissionError extends Error {
-  constructor(public statusCode: number, message: string) {
+  constructor(
+    public statusCode: number,
+    message: string,
+  ) {
     super(message);
-    this.name = 'PermissionError';
+    this.name = "PermissionError";
   }
 }
 
@@ -17,8 +20,8 @@ export interface AuthenticatedUser {
 export interface RoomAccess {
   room: Room;
   isOwner: boolean;
-  role: 'member' | 'admin' | null;
-  status: 'active' | 'banned' | null;
+  role: "member" | "admin" | null;
+  status: "active" | "banned" | null;
 }
 
 export class RoomPermissionService {
@@ -27,14 +30,17 @@ export class RoomPermissionService {
   /**
    * Authenticates a user using email and password and returns their profile and token.
    */
-  async login(email: string, password: string): Promise<{ user: AuthenticatedUser; token: string }> {
+  async login(
+    email: string,
+    password: string,
+  ): Promise<{ user: AuthenticatedUser; token: string }> {
     const { data, error } = await this.supabase.auth.signInWithPassword({
       email,
-      password
+      password,
     });
 
     if (error || !data.user || !data.session) {
-      throw new PermissionError(401, error?.message || 'Invalid email or password');
+      throw new PermissionError(401, error?.message || "Invalid email or password");
     }
 
     const user = this.mapAuthUser(data.user);
@@ -42,7 +48,7 @@ export class RoomPermissionService {
 
     return {
       user,
-      token: data.session.access_token
+      token: data.session.access_token,
     };
   }
 
@@ -51,19 +57,22 @@ export class RoomPermissionService {
    */
   async authenticate(authHeader: string | undefined): Promise<AuthenticatedUser> {
     if (!authHeader) {
-      throw new PermissionError(401, 'No authorization header provided');
+      throw new PermissionError(401, "No authorization header provided");
     }
 
-    const parts = authHeader.split(' ');
-    if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') {
-      throw new PermissionError(401, 'Invalid authorization header format. Use Bearer <token>');
+    const parts = authHeader.split(" ");
+    if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
+      throw new PermissionError(401, "Invalid authorization header format. Use Bearer <token>");
     }
 
     const token = parts[1];
-    const { data: { user }, error } = await this.supabase.auth.getUser(token);
+    const {
+      data: { user },
+      error,
+    } = await this.supabase.auth.getUser(token);
 
     if (error || !user) {
-      throw new PermissionError(401, error?.message || 'Invalid or expired authentication token');
+      throw new PermissionError(401, error?.message || "Invalid or expired authentication token");
     }
 
     const mappedUser = this.mapAuthUser(user);
@@ -76,45 +85,45 @@ export class RoomPermissionService {
   async assertActiveRoomAccess(userId: string, roomId: string): Promise<RoomAccess> {
     // Retrieve room details using Supabase
     const { data: room, error: roomError } = await this.supabase
-      .from('rooms')
-      .select('*')
-      .eq('id', roomId)
+      .from("rooms")
+      .select("*")
+      .eq("id", roomId)
       .single();
 
     if (roomError || !room) {
-      throw new PermissionError(404, 'Room not found');
+      throw new PermissionError(404, "Room not found");
     }
 
     const isOwner = room.owner_id === userId;
 
     // Retrieve membership details
     const { data: member, error: memberError } = await this.supabase
-      .from('room_members')
-      .select('*')
-      .eq('room_id', roomId)
-      .eq('user_id', userId)
+      .from("room_members")
+      .select("*")
+      .eq("room_id", roomId)
+      .eq("user_id", userId)
       .maybeSingle();
 
-    const role = member ? (member.role as 'member' | 'admin') : null;
-    const status = member ? (member.status as 'active' | 'banned') : null;
+    const role = member ? (member.role as "member" | "admin") : null;
+    const status = member ? (member.status as "active" | "banned") : null;
 
-    if (!isOwner && (!member || status !== 'active')) {
-      throw new PermissionError(403, 'You do not have active access to this room');
+    if (!isOwner && (!member || status !== "active")) {
+      throw new PermissionError(403, "You do not have active access to this room");
     }
 
     const mappedRoom: Room = {
       id: room.id,
       name: room.repository_name,
-      repoUrl: room.repository_remote_url || '',
-      defaultBranch: room.default_branch || 'main',
-      ownerId: room.owner_id
+      repoUrl: room.repository_remote_url || "",
+      defaultBranch: room.default_branch || "main",
+      ownerId: room.owner_id,
     };
 
     return {
       room: mappedRoom,
       isOwner,
       role,
-      status
+      status,
     };
   }
 
@@ -122,7 +131,7 @@ export class RoomPermissionService {
    * Asserts that a user holds at least the minimum required role in a room.
    * Owner gets implicit admin role.
    */
-  async assertRoomRole(userId: string, roomId: string, minRole: 'member' | 'admin'): Promise<void> {
+  async assertRoomRole(userId: string, roomId: string, minRole: "member" | "admin"): Promise<void> {
     const access = await this.assertActiveRoomAccess(userId, roomId);
 
     if (access.isOwner) {
@@ -130,8 +139,8 @@ export class RoomPermissionService {
       return;
     }
 
-    if (minRole === 'admin' && access.role !== 'admin') {
-      throw new PermissionError(403, 'Admin privileges are required for this action');
+    if (minRole === "admin" && access.role !== "admin") {
+      throw new PermissionError(403, "Admin privileges are required for this action");
     }
   }
 
@@ -139,17 +148,15 @@ export class RoomPermissionService {
    * Ensures the user profile is stored in the public.users database.
    */
   async ensureUserProfile(user: any): Promise<void> {
-    const name = user.user_metadata?.name || user.user_metadata?.full_name || '';
-    const { error } = await this.supabase
-      .from('users')
-      .upsert(
-        {
-          id: user.id,
-          email: user.email || '',
-          name: name
-        },
-        { onConflict: 'id' }
-      );
+    const name = user.user_metadata?.name || user.user_metadata?.full_name || "";
+    const { error } = await this.supabase.from("users").upsert(
+      {
+        id: user.id,
+        email: user.email || "",
+        name: name,
+      },
+      { onConflict: "id" },
+    );
 
     if (error) {
       throw new PermissionError(500, `Failed to ensure user profile: ${error.message}`);
@@ -162,8 +169,12 @@ export class RoomPermissionService {
   mapAuthUser(user: any): AuthenticatedUser {
     return {
       id: user.id,
-      email: user.email || '',
-      username: user.user_metadata?.username || user.user_metadata?.name || user.user_metadata?.full_name || undefined
+      email: user.email || "",
+      username:
+        user.user_metadata?.username ||
+        user.user_metadata?.name ||
+        user.user_metadata?.full_name ||
+        undefined,
     };
   }
 }

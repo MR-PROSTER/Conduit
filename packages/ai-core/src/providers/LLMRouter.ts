@@ -21,11 +21,11 @@ export class LLMRouter {
     switch (config.provider) {
       case "anthropic":
         return new AnthropicProvider(config.apiKey ?? "", modelId, {
-          contextWindow: config.contextWindow
+          contextWindow: config.contextWindow,
         });
       case "openai":
         return new OpenAIProvider(config.apiKey ?? "", modelId, {
-          contextWindow: config.contextWindow
+          contextWindow: config.contextWindow,
         });
       case "groq":
         return new GroqProvider(config.apiKey ?? "", modelId);

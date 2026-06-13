@@ -1,10 +1,18 @@
-import { SupabaseClient } from '@supabase/supabase-js';
-import type { ChatThread, ChatMessage, AttachmentMeta, ContextRef, AgentStep, FileDiff, SafetyBlock } from '@codesync/shared-types';
-import { getSupabaseClient } from './supabaseClient.js';
+import { SupabaseClient } from "@supabase/supabase-js";
+import type {
+  ChatThread,
+  ChatMessage,
+  AttachmentMeta,
+  ContextRef,
+  AgentStep,
+  FileDiff,
+  SafetyBlock,
+} from "@codesync/shared-types";
+import { getSupabaseClient } from "./supabaseClient.js";
 
 export interface CreateThreadInput {
   sessionId?: string;
-  type?: 'group' | 'private-fork' | 'public-fork' | 'standalone';
+  type?: "group" | "private-fork" | "public-fork" | "standalone";
   name?: string;
   forkedFromMessageId?: string;
   createdBy: string;
@@ -12,7 +20,7 @@ export interface CreateThreadInput {
 
 export interface AppendMessageInput {
   threadId: string;
-  role: 'user' | 'assistant' | 'system' | 'agent';
+  role: "user" | "assistant" | "system" | "agent";
   content: string;
   model?: string;
   tokensUsed?: number;
@@ -42,10 +50,10 @@ export class ChatRepository {
     }
     if (this.supabase) {
       try {
-        const { runMigrations } = await import('./migration.js');
+        const { runMigrations } = await import("./migration.js");
         await runMigrations(this.supabase);
       } catch (err) {
-        console.error('Failed to run migrations during ChatRepository initialization:', err);
+        console.error("Failed to run migrations during ChatRepository initialization:", err);
       }
     }
   }
@@ -56,7 +64,7 @@ export class ChatRepository {
 
   private checkConfig(): SupabaseClient {
     if (!this.supabase) {
-      throw new Error('Database is not configured. Did you call initialize()?');
+      throw new Error("Database is not configured. Did you call initialize()?");
     }
     return this.supabase;
   }
@@ -69,7 +77,7 @@ export class ChatRepository {
       name: row.name || undefined,
       forkedFromMessageId: row.forked_from_message_id || undefined,
       createdBy: row.created_by,
-      createdAt: row.created_at
+      createdAt: row.created_at,
     };
   }
 
@@ -77,15 +85,15 @@ export class ChatRepository {
     return {
       id: row.id,
       threadId: row.thread_id,
-      createdBy: row.sender_id || '',
+      createdBy: row.sender_id || "",
       createdAt: row.created_at,
       role: row.role,
-      content: row.content || '',
+      content: row.content || "",
       attachments: row.attachments || undefined,
       contextRefs: row.context_refs || undefined,
       agentSteps: row.agent_steps || undefined,
       fileDiffs: row.file_diffs || undefined,
-      safetyBlock: row.safety_block || undefined
+      safetyBlock: row.safety_block || undefined,
     };
   }
 
@@ -93,13 +101,13 @@ export class ChatRepository {
     const supabase = this.checkConfig();
 
     const { data, error } = await supabase
-      .from('chat_threads')
+      .from("chat_threads")
       .insert({
         session_id: input.sessionId || null,
-        type: input.type || 'standalone',
+        type: input.type || "standalone",
         name: input.name || null,
         forked_from_message_id: input.forkedFromMessageId || null,
-        created_by: input.createdBy
+        created_by: input.createdBy,
       })
       .select()
       .single();
@@ -112,9 +120,9 @@ export class ChatRepository {
     const supabase = this.checkConfig();
 
     const { data, error } = await supabase
-      .from('chat_threads')
-      .select('*')
-      .eq('id', id)
+      .from("chat_threads")
+      .select("*")
+      .eq("id", id)
       .maybeSingle();
 
     if (error) throw error;
@@ -125,29 +133,29 @@ export class ChatRepository {
   async listThreads(query: { sessionId?: string; createdBy?: string }): Promise<ChatThread[]> {
     const supabase = this.checkConfig();
 
-    let dbQuery = supabase.from('chat_threads').select('*');
+    let dbQuery = supabase.from("chat_threads").select("*");
     if (query.sessionId) {
-      dbQuery = dbQuery.eq('session_id', query.sessionId);
+      dbQuery = dbQuery.eq("session_id", query.sessionId);
     }
     if (query.createdBy) {
-      dbQuery = dbQuery.eq('created_by', query.createdBy);
+      dbQuery = dbQuery.eq("created_by", query.createdBy);
     }
 
-    const { data, error } = await dbQuery.order('created_at', { ascending: false });
+    const { data, error } = await dbQuery.order("created_at", { ascending: false });
     if (error) throw error;
 
-    return (data || []).map(row => this.mapThread(row));
+    return (data || []).map((row) => this.mapThread(row));
   }
 
   async appendMessage(input: AppendMessageInput): Promise<ChatMessage> {
     const supabase = this.checkConfig();
 
     const { data, error } = await supabase
-      .from('chat_messages')
+      .from("chat_messages")
       .insert({
         thread_id: input.threadId,
         role: input.role,
-        content: input.content || '',
+        content: input.content || "",
         model: input.model || null,
         tokens_used: input.tokensUsed || null,
         context_refs: input.contextRefs || null,
@@ -155,7 +163,7 @@ export class ChatRepository {
         attachments: input.attachments || null,
         file_diffs: input.fileDiffs || null,
         safety_block: input.safetyBlock || null,
-        sender_id: input.senderId || null
+        sender_id: input.senderId || null,
       })
       .select()
       .single();
@@ -166,29 +174,29 @@ export class ChatRepository {
 
   async getMessages(
     threadId: string,
-    options?: GetMessagesOptions
+    options?: GetMessagesOptions,
   ): Promise<{ messages: ChatMessage[]; nextCursor?: string }> {
     const supabase = this.checkConfig();
     const limit = options?.limit || 50;
 
     let dbQuery = supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('thread_id', threadId)
-      .order('created_at', { ascending: false })
+      .from("chat_messages")
+      .select("*")
+      .eq("thread_id", threadId)
+      .order("created_at", { ascending: false })
       .limit(limit + 1);
 
     if (options?.cursor) {
-      dbQuery = dbQuery.lt('created_at', options.cursor);
+      dbQuery = dbQuery.lt("created_at", options.cursor);
     }
 
     const { data, error } = await dbQuery;
     if (error) throw error;
 
     const hasMore = data && data.length > limit;
-    const messagesData = hasMore ? data.slice(0, limit) : (data || []);
+    const messagesData = hasMore ? data.slice(0, limit) : data || [];
 
-    const messages = messagesData.map(row => this.mapMessage(row));
+    const messages = messagesData.map((row) => this.mapMessage(row));
 
     let nextCursor: string | undefined = undefined;
     if (hasMore && messagesData.length > 0) {
@@ -197,7 +205,7 @@ export class ChatRepository {
 
     return {
       messages,
-      nextCursor
+      nextCursor,
     };
   }
 }

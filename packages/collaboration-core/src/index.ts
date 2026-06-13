@@ -7,13 +7,13 @@ export type {
   DecorationTypeLike,
   EditorDecorationTarget,
   CursorState,
-  RangeLike
+  RangeLike,
 } from "./CursorManager.js";
 export { DraftManager } from "./DraftManager.js";
 export type {
   DraftConflictResult,
   DraftFreshnessResult,
-  DraftManagerOptions
+  DraftManagerOptions,
 } from "./DraftManager.js";
 export { FileManager } from "./FileManager.js";
 export type {
@@ -21,7 +21,7 @@ export type {
   TextDocumentLike,
   TextEditorEditLike,
   TextEditorLike,
-  TextRangeLike
+  TextRangeLike,
 } from "./FileManager.js";
 
 export interface CollaborationSession {

@@ -8,12 +8,17 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.712.0",
     "@codesync/collaboration-core": "workspace:*",
+    "@codesync/git-core": "workspace:*",
     "@codesync/shared-types": "workspace:*",
     "@supabase/supabase-js": "^2",
+    "@y/websocket-server": "*",
     "dotenv": "^16",
     "express": "^5.2.1",
+    "lib0": "*",
     "ws": "^8.18.0",
+    "y-protocols": "*",
     "y-websocket": "^2.0.4",
     "yjs": "^13.6.31"
   },

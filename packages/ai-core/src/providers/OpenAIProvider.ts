@@ -7,7 +7,7 @@ import type {
   ILLMProvider,
   ImageAttachment,
   LLMRequestOptions,
-  LLMStreamChunk
+  LLMStreamChunk,
 } from "./ILLMProvider.js";
 import { getMimeTypeFromFileName, hasVisionMimeType } from "./fileTypeUtils.js";
 
@@ -21,7 +21,7 @@ export class OpenAIProvider implements ILLMProvider {
   constructor(
     apiKey: string,
     modelId = "gpt-4o",
-    private readonly opts: { baseURL?: string; contextWindow?: number } = {}
+    private readonly opts: { baseURL?: string; contextWindow?: number } = {},
   ) {
     this.client = new OpenAI({ apiKey, baseURL: this.opts.baseURL });
     this.modelId = modelId;
@@ -34,14 +34,14 @@ export class OpenAIProvider implements ILLMProvider {
 
   async *streamChat(
     messages: readonly ChatCompletionMessage[],
-    options: LLMRequestOptions = {}
+    options: LLMRequestOptions = {},
   ): AsyncIterable<LLMStreamChunk> {
     const stream = await this.client.chat.completions.create({
       model: this.modelId,
       messages: this.toOpenAIMessages(messages, options.systemPrompt),
       max_tokens: options.maxTokens,
       temperature: options.temperature,
-      stream: true
+      stream: true,
     } as any);
 
     let content = "";
@@ -60,7 +60,7 @@ export class OpenAIProvider implements ILLMProvider {
   async runAgentIteration(
     messages: readonly ChatCompletionMessage[],
     tools: readonly AgentToolDefinition[] = [],
-    options: LLMRequestOptions = {}
+    options: LLMRequestOptions = {},
   ): Promise<AgentIterationResult> {
     const response = await this.client.chat.completions.create({
       model: this.modelId,
@@ -68,7 +68,7 @@ export class OpenAIProvider implements ILLMProvider {
       tools: tools.map((tool) => this.toOpenAITool(tool)) as any,
       tool_choice: tools.length > 0 ? "auto" : undefined,
       max_tokens: options.maxTokens,
-      temperature: options.temperature
+      temperature: options.temperature,
     } as any);
 
     const choice = response.choices?.[0];
@@ -77,7 +77,7 @@ export class OpenAIProvider implements ILLMProvider {
       content: String(message?.content ?? ""),
       toolCalls: this.extractToolCalls(message?.tool_calls),
       stopReason: this.mapStopReason(choice?.finish_reason),
-      totalTokens: Number(response.usage?.total_tokens ?? 0)
+      totalTokens: Number(response.usage?.total_tokens ?? 0),
     };
   }
 
@@ -99,7 +99,10 @@ export class OpenAIProvider implements ILLMProvider {
     return Math.max(1, Math.ceil(text.length / 4));
   }
 
-  private toOpenAIMessages(messages: readonly ChatCompletionMessage[], systemPrompt?: string): any[] {
+  private toOpenAIMessages(
+    messages: readonly ChatCompletionMessage[],
+    systemPrompt?: string,
+  ): any[] {
     const mapped: any[] = [];
     if (systemPrompt) {
       mapped.push({ role: "system", content: systemPrompt });
@@ -110,8 +113,8 @@ export class OpenAIProvider implements ILLMProvider {
           role: "user",
           content: [
             { type: "text", text: message.content },
-            ...message.images.map((image) => this.toImageContent(image))
-          ]
+            ...message.images.map((image) => this.toImageContent(image)),
+          ],
         });
         continue;
       }
@@ -119,7 +122,7 @@ export class OpenAIProvider implements ILLMProvider {
         mapped.push({
           role: "tool",
           tool_call_id: message.toolCallId,
-          content: message.content
+          content: message.content,
         });
         continue;
       }
@@ -134,8 +137,8 @@ export class OpenAIProvider implements ILLMProvider {
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: tool.input_schema
-      }
+        parameters: tool.input_schema,
+      },
     };
   }
 
@@ -147,19 +150,21 @@ export class OpenAIProvider implements ILLMProvider {
     return {
       type: "image_url",
       image_url: {
-        url: `data:${mimeType};base64,${image.data}`
-      }
+        url: `data:${mimeType};base64,${image.data}`,
+      },
     };
   }
 
-  private extractToolCalls(toolCalls: any): readonly { id: string; name: string; input: unknown }[] {
+  private extractToolCalls(
+    toolCalls: any,
+  ): readonly { id: string; name: string; input: unknown }[] {
     if (!Array.isArray(toolCalls)) {
       return [];
     }
     return toolCalls.map((toolCall) => ({
       id: String(toolCall.id ?? ""),
       name: String(toolCall.function?.name ?? ""),
-      input: this.safeJsonParse(toolCall.function?.arguments)
+      input: this.safeJsonParse(toolCall.function?.arguments),
     }));
   }
 
@@ -185,8 +190,6 @@ export class OpenAIProvider implements ILLMProvider {
   }
 
   private stringifyMessages(messages: readonly ChatCompletionMessage[]): string {
-    return messages
-      .map((message) => `${message.role}: ${message.content}`)
-      .join("\n");
+    return messages.map((message) => `${message.role}: ${message.content}`).join("\n");
   }
 }
