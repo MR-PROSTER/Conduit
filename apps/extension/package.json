@@ -82,7 +82,7 @@
         {
           "id": "conduit",
           "title": "conduit",
-          "icon": "$(sync)"
+          "icon": "media/conduit.svg"
         }
       ]
     },

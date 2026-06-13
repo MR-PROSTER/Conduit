@@ -1,248 +1,324 @@
 import * as vscode from "vscode";
 import type { Draft } from "@conduit/shared-types";
-import type {
-  BroadcastHub,
-  CollaborationSnapshot,
-} from "./broadcast.js";
-import type { BranchSessionRegistry, SessionDescriptor } from "./BranchSessionRegistry.js";
+import type { BroadcastHub, CollaborationSnapshot } from "./broadcast.js";
+import type { BranchSessionRegistry } from "./BranchSessionRegistry.js";
 import type { ConduitWebSocketClient } from "./wsClient.js";
 import type { AuthService } from "./AuthService.js";
 
+export interface SessionDescriptor {
+    readonly roomId: string;
+    readonly roomName: string;
+    readonly ownerEmail: string;
+    readonly sessionId: string;
+    readonly branch: string;
+    readonly status: string;
+    readonly participantCount: number;
+    readonly hasSavedDraft: boolean;
+    readonly draftPath: string | undefined;
+}
+
 interface SidebarState {
-  authed: boolean;
-  user: {
-    id: string;
-    name: string;
-  } | null;
-  localUserId: string;
-  localUserName: string;
-  snapshot: CollaborationSnapshot;
-  knownSession: SessionDescriptor | null;
-  drafts: readonly Draft[];
+    authed: boolean;
+    user: {
+        id: string;
+        name: string;
+    } | null;
+    localUserId: string;
+    localUserName: string;
+    activeFile: string | null;
+    snapshot: CollaborationSnapshot;
+    knownSession: SessionDescriptor | null;
+    drafts: readonly Draft[];
 }
 
 interface SidebarMessage {
-  type:
+    type:
     | "signIn"
     | "signOut"
+    | "showAccount"
     | "createSession"
     | "joinSession"
     | "leaveSession"
     | "switchBranch"
+    | "refresh"
     | "restoreDraft";
-  draftId?: string;
+    draftId?: string;
 }
 
 export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Disposable {
-  public static readonly viewType = "conduit.sidebar";
+    public static readonly viewType = "conduit.sidebar";
 
-  private readonly disposables: vscode.Disposable[] = [];
-  private view: vscode.WebviewView | undefined;
+    private readonly disposables: vscode.Disposable[] = [];
+    private view: vscode.WebviewView | undefined;
 
-  constructor(
-    private readonly broadcastHub: BroadcastHub,
-    private readonly branchSessionRegistry: BranchSessionRegistry,
-    private readonly wsClient: ConduitWebSocketClient,
-    private readonly websocketUrl: string,
-    private readonly authService: AuthService,
-    private readonly localUserId: string,
-    private readonly localUserName: string,
-    private readonly extensionUri: vscode.Uri
-  ) {
-    this.disposables.push(
-      this.authService.onDidAuthStateChange(() => {
-        void this.refreshView();
-      })
-    );
-  }
+    constructor(
+        private readonly broadcastHub: BroadcastHub,
+        private readonly branchSessionRegistry: BranchSessionRegistry,
+        private readonly wsClient: ConduitWebSocketClient,
+        private readonly websocketUrl: string,
+        private readonly authService: AuthService,
+        private readonly localUserId: string,
+        private readonly localUserName: string,
+        private readonly extensionUri: vscode.Uri
+    ) {
+        this.disposables.push(
+            vscode.window.onDidChangeActiveTextEditor(() => {
+                void this.refreshView();
+            })
+        );
+    }
 
-  resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
-  ): void {
-    this.view = webviewView;
-    webviewView.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [this.extensionUri],
-    };
+    public async refresh(): Promise<void> {
+        await this.refreshView();
+    }
 
-    const initialState = this.buildState();
-    webviewView.webview.html = this.renderHtml(webviewView.webview, initialState);
+    resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        _context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken
+    ): void {
+        this.view = webviewView;
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this.extensionUri],
+        };
 
-    this.disposables.push(
-      this.broadcastHub.onDidBroadcast((event) => {
-        if (event.type !== "snapshot") {
-          return;
-        }
+        const initialState = this.buildPlaceholderState();
+        webviewView.webview.html = this.renderHtml(webviewView.webview, initialState);
 
-        void this.refreshView(event.snapshot);
-      }),
-      webviewView.webview.onDidReceiveMessage((message: SidebarMessage) => {
-        void this.handleMessage(message);
-      }),
-      webviewView.onDidDispose(() => {
+        this.disposables.push(
+            this.broadcastHub.onDidBroadcast((event) => {
+                if (event.type === "snapshot") {
+                    void this.refreshView(event.snapshot);
+                }
+            }),
+            webviewView.webview.onDidReceiveMessage((message: SidebarMessage) => {
+                void this.handleMessage(message);
+            }),
+            webviewView.onDidDispose(() => {
+                this.view = undefined;
+            })
+        );
+
+        void this.refreshView(initialState.snapshot);
+    }
+
+    dispose(): void {
         this.view = undefined;
-      })
-    );
-
-    void this.refreshView(initialState.snapshot);
-  }
-
-  dispose(): void {
-    this.view = undefined;
-    vscode.Disposable.from(...this.disposables).dispose();
-  }
-
-  private async handleMessage(message: SidebarMessage): Promise<void> {
-    switch (message.type) {
-      case "signIn":
-        await vscode.commands.executeCommand("conduit.signIn");
-        break;
-      case "signOut":
-        await vscode.commands.executeCommand("conduit.signOut");
-        break;
-      case "createSession":
-        await vscode.commands.executeCommand("conduit.createSession");
-        break;
-      case "joinSession":
-        await vscode.commands.executeCommand("conduit.joinSession");
-        break;
-      case "leaveSession":
-        await vscode.commands.executeCommand("conduit.leaveSession");
-        break;
-      case "switchBranch":
-        await vscode.commands.executeCommand("conduit.switchBranch");
-        break;
-      case "restoreDraft":
-        await vscode.commands.executeCommand("conduit.restoreDrafts");
-        break;
+        vscode.Disposable.from(...this.disposables).dispose();
     }
 
-    await this.refreshView();
-  }
-
-  private buildState(snapshot = this.broadcastHub.getSnapshot()): SidebarState {
-    const authState = this.authService.getState();
-    const user = authState.user?.id
-      ? {
-          id: String(authState.user.id),
-          name: String(authState.user.name || this.localUserName),
+    private async handleMessage(message: SidebarMessage): Promise<void> {
+        switch (message.type) {
+            case "signIn":
+                await vscode.commands.executeCommand("conduit.signIn");
+                break;
+            case "signOut":
+                await vscode.commands.executeCommand("conduit.signOut");
+                break;
+            case "showAccount":
+                await vscode.commands.executeCommand("conduit.showAccount");
+                break;
+            case "createSession":
+                await vscode.commands.executeCommand("conduit.createSession");
+                break;
+            case "joinSession":
+                await vscode.commands.executeCommand("conduit.joinSession");
+                break;
+            case "leaveSession":
+                await vscode.commands.executeCommand("conduit.leaveSession");
+                break;
+            case "switchBranch":
+                await vscode.commands.executeCommand("conduit.switchBranch");
+                break;
+            case "refresh":
+                await this.refreshView();
+                return;
+            case "restoreDraft":
+                await vscode.commands.executeCommand("conduit.restoreDrafts");
+                break;
         }
-      : null;
-    const knownSession = snapshot.session?.branch
-      ? this.branchSessionRegistry.get(snapshot.session.branch) ?? null
-      : null;
 
-    return {
-      authed: Boolean(authState.accessToken && authState.user),
-      user,
-      localUserId: this.localUserId,
-      localUserName: this.localUserName,
-      snapshot,
-      knownSession,
-      drafts: [],
-    };
-  }
-
-  private async refreshView(snapshot = this.broadcastHub.getSnapshot()): Promise<void> {
-    const nextState = this.buildState(snapshot);
-    nextState.drafts = await this.loadDrafts(nextState.authed);
-    await this.view?.webview.postMessage({
-      type: "state",
-      state: nextState,
-    });
-  }
-
-  private async loadDrafts(authed: boolean): Promise<readonly Draft[]> {
-    if (!authed) {
-      return [];
+        await this.refreshView();
     }
 
-    try {
-      return await this.wsClient.listDraftsFn({ status: "active" });
-    } catch {
-      return [];
+    private buildPlaceholderState(snapshot = this.broadcastHub.getSnapshot()): SidebarState {
+        const activeEditor = vscode.window.activeTextEditor;
+        return {
+            authed: false,
+            user: null,
+            localUserId: this.localUserId,
+            localUserName: this.localUserName,
+            activeFile: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri, false) : null,
+            snapshot,
+            knownSession: null,
+            drafts: [],
+        };
     }
-  }
 
-  private renderHtml(webview: vscode.Webview, state: SidebarState): string {
-    const nonce = createNonce();
-    const initialState = serializeState(state);
+    private buildState(snapshot = this.broadcastHub.getSnapshot(), authState: any): SidebarState {
+        const activeEditor = vscode.window.activeTextEditor;
+        const user = authState.user?.id
+            ? {
+                id: String(authState.user.id),
+                name: String(authState.user.name || this.localUserName),
+            }
+            : null;
+        const record = snapshot.session?.branch
+            ? this.branchSessionRegistry.getRestorableSession(snapshot.session.branch) ?? null
+            : null;
+        const knownSession: SessionDescriptor | null = record ? {
+            roomId: record.room.id,
+            roomName: record.room.name,
+            ownerEmail: (record.room as any).ownerEmail || "unknown",
+            sessionId: record.session.id,
+            branch: record.session.branch,
+            status: record.session.status,
+            participantCount: record.participantCount,
+            hasSavedDraft: record.hasSavedDraft,
+            draftPath: record.draftPath
+        } : null;
 
-    return `<!DOCTYPE html>
+        return {
+            authed: Boolean(authState.accessToken && authState.user),
+            user,
+            localUserId: this.localUserId,
+            localUserName: this.localUserName,
+            activeFile: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri, false) : null,
+            snapshot,
+            knownSession,
+            drafts: [],
+        };
+    }
+
+    private async refreshView(snapshot = this.broadcastHub.getSnapshot()): Promise<void> {
+        const authState = await this.authService.getState();
+        const nextState = this.buildState(snapshot, authState);
+        nextState.drafts = await this.loadDrafts(nextState.authed);
+        await this.view?.webview.postMessage({
+            type: "state",
+            state: nextState,
+        });
+    }
+
+    private async loadDrafts(authed: boolean): Promise<readonly Draft[]> {
+        if (!authed) {
+            return [];
+        }
+
+        try {
+            const list = await this.wsClient.discoverDrafts();
+            return list.map(item => item.draft).filter(d => d.status === "active");
+        } catch {
+            return [];
+        }
+    }
+
+    private renderHtml(webview: vscode.Webview, state: SidebarState): string {
+        const nonce = createNonce();
+        const initialState = serializeState(state);
+        const logoUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, "media", "conduit.svg")
+        );
+        const fontUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, "media", "fonts", "Arima-font.ttf")
+        );
+
+        return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
   <style>
-    :root {
-      --panel: color-mix(in srgb, var(--vscode-sideBar-background) 88%, black 12%);
-      --panel-2: color-mix(in srgb, var(--vscode-editorWidget-background) 72%, var(--vscode-sideBar-background) 28%);
-      --border: color-mix(in srgb, var(--vscode-editorWidget-border) 80%, transparent);
-      --soft: var(--vscode-descriptionForeground);
-      --accent: var(--vscode-button-background);
-      --accent-2: var(--vscode-button-hoverBackground);
-      --good: #43d17a;
-      --warn: #ffbf3c;
-      --bad: #ff6b6b;
+    @font-face {
+      font-family: 'Arima';
+      src: url('${fontUri}') format('truetype');
+      font-weight: normal;
+      font-style: normal;
     }
 
-    * { box-sizing: border-box; }
+    :root {
+      --bg: color-mix(in srgb, var(--vscode-sideBar-background) 84%, #0b0f14 16%);
+      --panel: color-mix(in srgb, var(--vscode-editorWidget-background) 82%, #101418 18%);
+      --panel-2: color-mix(in srgb, var(--vscode-editorWidget-background) 68%, #0f1319 32%);
+      --border: color-mix(in srgb, var(--vscode-editorWidget-border) 82%, transparent);
+      --soft: var(--vscode-descriptionForeground);
+      --accent: color-mix(in srgb, var(--vscode-button-background) 74%, #efbf8d 26%);
+      --accent-hover: color-mix(in srgb, var(--vscode-button-hoverBackground) 72%, #f1c999 28%);
+      --good: #50d37c;
+      --warn: #ffbf4d;
+      --bad: #ff6b6b;
+      --shadow: 0 14px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
-      padding: 0;
-      background:
-        radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 18%, transparent) 0, transparent 32%),
-        linear-gradient(180deg, var(--panel) 0%, var(--vscode-sideBar-background) 55%);
       color: var(--vscode-foreground);
-      font-family: var(--vscode-font-family);
+      font-family: 'Arima', var(--vscode-font-family), sans-serif;
+      min-height: 100vh;
     }
 
     .shell {
-      padding: 14px;
+      padding: 10px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .hero {
+      padding: 12px;
       display: grid;
       gap: 12px;
     }
 
-    .hero {
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 14px;
-      background: rgba(0, 0, 0, 0.14);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
-    }
-
-    .title {
+    .hero-top {
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      align-items: flex-start;
+      gap: 10px;
     }
 
-    .kicker {
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
+    .eyebrow {
+      margin: 0 0 6px;
       font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
       color: var(--soft);
-      margin-bottom: 8px;
     }
 
-    h1 {
+    .hero h1 {
       margin: 0;
-      font-size: 18px;
-      line-height: 1.2;
+      font-size: 19px;
+      line-height: 1.15;
+      letter-spacing: 0.01em;
+    }
+
+    .subtle {
+      color: var(--soft);
+      font-size: 12px;
+      line-height: 1.45;
+      margin-top: 5px;
     }
 
     .pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      border-radius: 999px;
       padding: 6px 10px;
+      border-radius: 999px;
       border: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.16);
       font-size: 11px;
       white-space: nowrap;
     }
@@ -255,94 +331,38 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       background: var(--soft);
     }
 
-    .grid {
+    .details {
       display: grid;
-      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 16px;
     }
 
-    .card {
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 12px;
-      background: color-mix(in srgb, var(--panel-2) 92%, transparent);
-    }
-
-    .card h2 {
-      margin: 0 0 8px;
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--soft);
-    }
-
-    .muted {
-      color: var(--soft);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .meta {
+    .detail {
       display: grid;
-      gap: 8px;
-      font-size: 12px;
-    }
-
-    .meta-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .meta-label {
-      color: var(--soft);
-    }
-
-    .collaborators,
-    .drafts {
-      display: grid;
-      gap: 8px;
-    }
-
-    .person,
-    .draft {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px;
-      background: rgba(255, 255, 255, 0.03);
-    }
-
-    .person-main,
-    .draft-main {
-      display: flex;
-      align-items: center;
-      gap: 10px;
+      gap: 3px;
       min-width: 0;
     }
 
-    .person-name,
-    .draft-title {
-      font-weight: 600;
+    .label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--soft);
+    }
+
+    .value {
       font-size: 13px;
-      white-space: nowrap;
+      font-weight: 600;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .person-sub,
-    .draft-sub {
+    .value.code {
+      font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Consolas, monospace);
       font-size: 12px;
-      color: var(--soft);
-      margin-top: 2px;
-    }
-
-    .stack {
-      min-width: 0;
-      display: grid;
-      gap: 2px;
+      font-weight: 500;
     }
 
     .actions {
@@ -354,21 +374,144 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
     button {
       appearance: none;
       border: 1px solid var(--border);
+      border-radius: 10px;
       background: var(--accent);
       color: var(--vscode-button-foreground);
-      border-radius: 10px;
-      padding: 8px 10px;
       font: inherit;
       font-size: 12px;
+      padding: 7px 12px;
       cursor: pointer;
+      transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+
+    button:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
     }
 
     button.secondary {
       background: transparent;
+      color: var(--vscode-foreground);
     }
 
-    button:hover {
-      background: var(--accent-2);
+    .section {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--soft);
+    }
+
+    .count {
+      font-size: 11px;
+      color: var(--soft);
+    }
+
+    .collaborators {
+      display: grid;
+      gap: 8px;
+    }
+
+    .collaborator {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .collaborator-main {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .avatar {
+      position: relative;
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: white;
+      flex: 0 0 auto;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+      overflow: hidden;
+    }
+
+    .presence {
+      position: absolute;
+      right: -1px;
+      bottom: -1px;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--good);
+      border: 2px solid color-mix(in srgb, var(--panel) 80%, #000 20%);
+    }
+
+    .name-stack {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+
+    .name {
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status {
+      font-size: 12px;
+      color: var(--soft);
+    }
+
+    .badge {
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .badge.owner {
+      background: rgba(239, 191, 141, 0.18);
+      color: #ffd6a7;
+      border-color: rgba(239, 191, 141, 0.28);
+    }
+
+    .badge.admin {
+      background: rgba(113, 186, 255, 0.16);
+      color: #b8dbff;
+      border-color: rgba(113, 186, 255, 0.28);
+    }
+
+    .badge.member {
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--soft);
+      border-color: var(--border);
     }
 
     .empty {
@@ -377,36 +520,60 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       border-radius: 12px;
       color: var(--soft);
       font-size: 12px;
-    }
-
-    .auth-banner {
-      display: grid;
-      gap: 10px;
+      background: rgba(255, 255, 255, 0.015);
     }
   </style>
 </head>
 <body>
   <div class="shell">
-    <section class="hero">
-      <div class="kicker">Conduit Sidebar</div>
-      <div class="title">
+    <section class="panel hero">
+      <div class="hero-top">
         <div>
-          <h1>Sessions, collaborators, and drafts</h1>
-          <div class="muted" id="subtitle"></div>
+          <div class="eyebrow" style="display: flex; align-items: center; gap: 6px;">
+            <img src="${logoUri}" alt="Conduit Logo" style="width: 14px; height: 14px;">
+            Conduit
+          </div>
+          <h1 id="roomTitle">Loading session...</h1>
+          <div class="subtle" id="subtitle"></div>
         </div>
         <div class="pill" id="connectionPill"></div>
       </div>
+
+      <div class="details" id="details"></div>
+
+      <div class="actions" id="actions"></div>
     </section>
 
-    <section class="grid" id="content"></section>
+    <section class="panel section">
+      <div class="section-head">
+        <div class="section-title">Active collaborators</div>
+        <div class="count" id="participantCount"></div>
+      </div>
+      <div id="collaborators" class="collaborators"></div>
+    </section>
+
+    <section class="panel section" id="draftsSection" hidden>
+      <div class="section-head">
+        <div class="section-title">Drafts</div>
+        <div class="count" id="draftCount"></div>
+      </div>
+      <div id="drafts" class="collaborators"></div>
+    </section>
   </div>
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const initialState = ${initialState};
-    const content = document.getElementById('content');
+    const roomTitle = document.getElementById('roomTitle');
     const subtitle = document.getElementById('subtitle');
     const connectionPill = document.getElementById('connectionPill');
+    const detailsEl = document.getElementById('details');
+    const actionsEl = document.getElementById('actions');
+    const collaboratorsEl = document.getElementById('collaborators');
+    const participantCountEl = document.getElementById('participantCount');
+    const draftsSectionEl = document.getElementById('draftsSection');
+    const draftsEl = document.getElementById('drafts');
+    const draftCountEl = document.getElementById('draftCount');
 
     function escapeHtml(value) {
       return String(value)
@@ -419,12 +586,49 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
 
     function stateLabel(state) {
       switch (state) {
-        case 'connected': return 'Connected';
-        case 'connecting': return 'Connecting';
-        case 'reconnecting': return 'Reconnecting';
-        case 'error': return 'Error';
-        default: return 'Disconnected';
+        case 'connected':
+          return 'Connected';
+        case 'connecting':
+          return 'Connecting';
+        case 'reconnecting':
+          return 'Reconnecting';
+        case 'error':
+          return 'Error';
+        default:
+          return 'Disconnected';
       }
+    }
+
+    function stateColor(state) {
+      switch (state) {
+        case 'connected':
+          return 'var(--good)';
+        case 'error':
+          return 'var(--bad)';
+        default:
+          return 'var(--warn)';
+      }
+    }
+
+    function initials(name) {
+      const parts = String(name || 'Anonymous').trim().split(/\\s+/).filter(Boolean);
+      if (parts.length === 0) {
+        return '?';
+      }
+      if (parts.length === 1) {
+        return parts[0].slice(0, 2).toUpperCase();
+      }
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+
+    function collaboratorRole(index, collaborator, total, localUserId) {
+      if (collaborator && collaborator.userId && collaborator.userId === localUserId) {
+        return 'Owner';
+      }
+      if (index === 0) {
+        return 'Owner';
+      }
+      return total > 1 ? 'Admin' : 'Member';
     }
 
     function render(state) {
@@ -436,93 +640,92 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       const branchName = snapshot.session?.branch || state.knownSession?.branch || 'No branch';
       const sessionId = snapshot.session?.id || state.knownSession?.sessionId || 'No session';
       const websocketUrl = snapshot.websocketUrl || ${JSON.stringify(this.websocketUrl)};
+      const activeFile = state.activeFile || 'No active file';
+      const accountName = state.user?.name || state.localUserName || 'Not signed in';
 
+      roomTitle.textContent = authed ? roomName : 'Sign in to continue';
       subtitle.textContent = authed
-        ? 'Signed in as ' + (state.user?.name || state.localUserName || 'Unknown')
+        ? 'Signed in as ' + accountName
         : 'Sign in to create, join, and restore sessions.';
 
-      connectionPill.innerHTML = '<span class="dot" style="background:' + (snapshot.state === 'connected' ? 'var(--good)' : snapshot.state === 'error' ? 'var(--bad)' : 'var(--warn)') + '"></span>' +
-        escapeHtml(stateLabel(snapshot.state));
+      connectionPill.innerHTML = '<span class="dot" style="background:' + stateColor(snapshot.state) + '"></span>' + escapeHtml(stateLabel(snapshot.state));
 
-      const sessionCard = authed
-        ? \`
-          <section class="card">
-            <h2>Room & Session</h2>
-            <div class="meta">
-              <div class="meta-row"><span class="meta-label">Room</span><span>\${escapeHtml(roomName)}</span></div>
-              <div class="meta-row"><span class="meta-label">Branch</span><span>\${escapeHtml(branchName)}</span></div>
-              <div class="meta-row"><span class="meta-label">Session</span><span>\${escapeHtml(sessionId)}</span></div>
-              <div class="meta-row"><span class="meta-label">Participants</span><span>\${collaborators.length}</span></div>
-              <div class="meta-row"><span class="meta-label">WebSocket</span><span>\${escapeHtml(websocketUrl)}</span></div>
-            </div>
-          </section>\`
-        : \`
-          <section class="card auth-banner">
-            <h2>Sign In</h2>
-            <div class="muted">Sign in to create or join a room, manage drafts, and see collaborators.</div>
-            <div class="actions">
-              <button data-action="signIn">Sign in</button>
-            </div>
-          </section>\`;
+      detailsEl.innerHTML = authed
+        ? [
+            ['Current branch', branchName, 'value'],
+            ['Active file', activeFile, 'value code'],
+            ['Room ID', snapshot.roomId || 'No room', 'value code'],
+            ['Session', sessionId, 'value code'],
+            ['Participants', String(collaborators.length), 'value'],
+            ['Account', accountName, 'value'],
+          ]
+            .map((item) => '<div class="detail"><div class="label">' + escapeHtml(item[0]) + '</div><div class="' + item[2] + '">' + escapeHtml(item[1]) + '</div></div>')
+            .join('')
+        : '<div class="empty" style="grid-column: 1 / -1;">Sign in to create or join a room, manage drafts, and see collaborators.</div>';
 
-      const collaboratorsCard = authed
-        ? \`
-          <section class="card">
-            <h2>Collaborators</h2>
-            \${collaborators.length ? \`
-              <div class="collaborators">
-                \${collaborators.map((collaborator) => \`
-                  <div class="person">
-                    <div class="person-main">
-                      <span class="dot" style="background:\${escapeHtml(collaborator.color || '#888')}\"></span>
-                      <div class="stack">
-                        <div class="person-name">\${escapeHtml(collaborator.name || collaborator.userId || 'Anonymous')}</div>
-                        <div class="person-sub">\${escapeHtml(collaborator.userId || '')}</div>
-                      </div>
-                    </div>
-                    <div class="muted">\${escapeHtml(collaborator.status || 'online')}</div>
-                  </div>\`).join('')}
-              </div>\`
-            : '<div class="empty">No collaborators yet.</div>'}
-          </section>\`
+      actionsEl.innerHTML = authed
+        ? [
+            ['signOut', 'Sign Out', 'secondary'],
+            ['showAccount', 'Account', 'secondary'],
+            ['createSession', 'Create Session', ''],
+            ['joinSession', 'Join Session', 'secondary'],
+            ['leaveSession', 'Leave Session', 'secondary'],
+            ['refresh', 'Refresh', 'secondary'],
+          ]
+            .map((item) => '<button data-action="' + item[0] + '"' + (item[2] ? ' class="' + item[2] + '"' : '') + '>' + item[1] + '</button>')
+            .join('')
+        : '<button data-action="signIn">Sign In</button><button class="secondary" data-action="refresh">Refresh</button>';
+
+      participantCountEl.textContent = collaborators.length + ' collaborator' + (collaborators.length === 1 ? '' : 's');
+
+      collaboratorsEl.innerHTML = authed
+        ? (collaborators.length
+            ? collaborators
+                .map((collaborator, index) => {
+                  const name = collaborator.name || collaborator.userId || 'Anonymous';
+                  const role = collaboratorRole(index, collaborator, collaborators.length, state.localUserId);
+                  return [
+                    '<div class="collaborator">',
+                      '<div class="collaborator-main">',
+                        '<div class="avatar" style="background:' + escapeHtml(collaborator.color || '#666') + '">',
+                          escapeHtml(initials(name)),
+                          '<span class="presence"></span>',
+                        '</div>',
+                        '<div class="name-stack">',
+                          '<div class="name">' + escapeHtml(name) + '</div>',
+                          '<div class="status">' + escapeHtml(collaborator.status || 'online') + '</div>',
+                        '</div>',
+                      '</div>',
+                      '<span class="badge ' + role.toLowerCase() + '">' + escapeHtml(role) + '</span>',
+                    '</div>',
+                  ].join('');
+                })
+                .join('')
+            : '<div class="empty">No collaborators yet.</div>')
+        : '<div class="empty">Sign in to view collaborators.</div>';
+
+      draftsSectionEl.hidden = !drafts.length;
+      draftCountEl.textContent = String(drafts.length);
+      draftsEl.innerHTML = drafts.length
+        ? drafts
+            .map((draft) => {
+              return [
+                '<div class="collaborator">',
+                  '<div class="collaborator-main">',
+                    '<div class="avatar" style="background: linear-gradient(135deg, var(--accent), #5e2f1d);">',
+                      'DS',
+                    '</div>',
+                    '<div class="name-stack">',
+                      '<div class="name">' + escapeHtml(draft.branch || 'Draft') + '</div>',
+                      '<div class="status">' + escapeHtml(draft.id) + ' · ' + escapeHtml(draft.status) + '</div>',
+                    '</div>',
+                  '</div>',
+                  '<button class="secondary" data-action="restoreDraft" data-draft-id="' + escapeHtml(draft.id) + '">Restore</button>',
+                '</div>',
+              ].join('');
+            })
+            .join('')
         : '';
-
-      const draftsCard = authed
-        ? \`
-          <section class="card">
-            <h2>Drafts</h2>
-            \${drafts.length ? \`
-              <div class="drafts">
-                \${drafts.map((draft) => \`
-                  <div class="draft">
-                    <div class="draft-main">
-                      <div class="stack">
-                        <div class="draft-title">\${escapeHtml(draft.branch || 'Draft')}</div>
-                        <div class="draft-sub">\${escapeHtml(draft.id)} · \${escapeHtml(draft.status)} · \${escapeHtml(draft.createdAt || '')}</div>
-                      </div>
-                    </div>
-                    <button class="secondary" data-action="restoreDraft" data-draft-id="\${escapeHtml(draft.id)}">Restore</button>
-                  </div>\`).join('')}
-              </div>\`
-            : '<div class="empty">No active drafts available.</div>'}
-          </section>\`
-        : '';
-
-      const actionsCard = authed
-        ? \`
-          <section class="card">
-            <h2>Actions</h2>
-            <div class="actions">
-              <button data-action="createSession">Create Session</button>
-              <button data-action="joinSession">Join Session</button>
-              <button data-action="switchBranch">Switch Branch</button>
-              <button class="secondary" data-action="leaveSession">Leave Session</button>
-              <button class="secondary" data-action="signOut">Sign out</button>
-            </div>
-          </section>\`
-        : '';
-
-      content.innerHTML = sessionCard + collaboratorsCard + draftsCard + actionsCard;
     }
 
     document.addEventListener('click', (event) => {
@@ -533,7 +736,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
 
       vscode.postMessage({
         type: button.dataset.action,
-        draftId: button.dataset.draftId
+        draftId: button.dataset.draftId,
       });
     });
 
@@ -550,18 +753,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
   </script>
 </body>
 </html>`;
-  }
+    }
 }
 
 function createNonce(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 16; index += 1) {
-    value += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return value;
+    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+    let value = "";
+
+    for (let index = 0; index < 16; index += 1) {
+        value += alphabet[Math.floor(Math.random() * alphabet.length)];
+    }
+
+    return value;
 }
 
 function serializeState(state: SidebarState): string {
-  return JSON.stringify(state).replace(/</g, "\\u003c");
+    return JSON.stringify(state).replace(/</g, "\\u003c");
 }
