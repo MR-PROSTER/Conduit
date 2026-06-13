@@ -1,0 +1,8 @@
+{
+  "name": "@conduit/collaboration-core",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

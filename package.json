@@ -1,0 +1,26 @@
+{
+  "name": "conduit",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.8.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "tsc -b tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2",
+    "dotenv": "^16"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "eslint": "^9",
+    "eslint-config-prettier": "^10",
+    "globals": "^16",
+    "prettier": "^3",
+    "rimraf": "^6",
+    "typescript": "^5.8",
+    "typescript-eslint": "^8"
+  }
+}

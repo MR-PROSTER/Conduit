@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./apps/backend" },
+    { "path": "./apps/extension" },
+    { "path": "./apps/dashboard" },
+    { "path": "./packages/shared-types" },
+    { "path": "./packages/collaboration-core" },
+    { "path": "./packages/git-core" },
+    { "path": "./packages/ai-core" }
+  ]
+}

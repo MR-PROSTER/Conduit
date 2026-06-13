@@ -1,0 +1,8 @@
+{
+  "name": "@conduit/ai-core",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b"
+  }
+}
