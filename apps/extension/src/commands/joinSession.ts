@@ -157,7 +157,22 @@ export const joinSessionCommand = (
 ): vscode.Disposable => {
   return vscode.commands.registerCommand("conduit.joinSession", async () => {
     const stateManager = getStateManager();
-    const state = stateManager.get();
+    let state = stateManager.get();
+
+    if (state.state === "IN_ROOM_IN_SESSION") {
+      const leaveAction = await vscode.window.showWarningMessage(
+        "You are already in an active session. Would you like to leave it before continuing?",
+        { modal: true },
+        "Leave and Continue",
+        "Cancel"
+      );
+      if (leaveAction !== "Leave and Continue") {
+        return;
+      }
+      await vscode.commands.executeCommand("conduit.leaveSession");
+      state = stateManager.get();
+    }
+
     if (state.state !== "IN_ROOM_NO_SESSION") {
       void vscode.window.showInformationMessage(
         "Join a room before joining a session."
@@ -254,7 +269,13 @@ export const joinSessionCommand = (
         "info",
         `Joined collaborative session ${selectedDiscoveredSession.entry.session.id}`
       );
-      void services.draftRestoreController.promptToRestoreUnresolvedDrafts();
+      services.draftRestoreController.promptToRestoreSessionDrafts(
+        selectedDiscoveredSession.entry.session.id
+      ).then((prompted) => {
+        if (!prompted) {
+          void services.draftRestoreController.promptToRestoreUnresolvedDrafts();
+        }
+      });
       return;
     }
 
@@ -379,6 +400,12 @@ export const joinSessionCommand = (
       "info",
       `Joined collaborative session ${session.id} for branch ${branch}`
     );
-    void services.draftRestoreController.promptToRestoreUnresolvedDrafts();
+    services.draftRestoreController.promptToRestoreSessionDrafts(
+      session.id
+    ).then((prompted) => {
+      if (!prompted) {
+        void services.draftRestoreController.promptToRestoreUnresolvedDrafts();
+      }
+    });
   });
 };

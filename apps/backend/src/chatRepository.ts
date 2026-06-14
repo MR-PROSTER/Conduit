@@ -11,6 +11,7 @@ import type {
 import { getSupabaseClient } from "./supabaseClient.js";
 
 export interface CreateThreadInput {
+  id?: string;
   sessionId?: string;
   type?: "group" | "private-fork" | "public-fork" | "standalone";
   name?: string;
@@ -19,6 +20,7 @@ export interface CreateThreadInput {
 }
 
 export interface AppendMessageInput {
+  id?: string;
   threadId: string;
   role: "user" | "assistant" | "system" | "agent";
   content: string;
@@ -100,15 +102,20 @@ export class ChatRepository {
   async createThread(input: CreateThreadInput): Promise<ChatThread> {
     const supabase = this.checkConfig();
 
+    const insertData: any = {
+      session_id: input.sessionId || null,
+      type: input.type || "standalone",
+      name: input.name || null,
+      forked_from_message_id: input.forkedFromMessageId || null,
+      created_by: input.createdBy,
+    };
+    if (input.id) {
+      insertData.id = input.id;
+    }
+
     const { data, error } = await supabase
       .from("chat_threads")
-      .insert({
-        session_id: input.sessionId || null,
-        type: input.type || "standalone",
-        name: input.name || null,
-        forked_from_message_id: input.forkedFromMessageId || null,
-        created_by: input.createdBy,
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -150,21 +157,48 @@ export class ChatRepository {
   async appendMessage(input: AppendMessageInput): Promise<ChatMessage> {
     const supabase = this.checkConfig();
 
+    const insertData: any = {
+      thread_id: input.threadId,
+      role: input.role,
+      content: input.content || "",
+      model: input.model || null,
+      tokens_used: input.tokensUsed || null,
+      context_refs: input.contextRefs || null,
+      agent_steps: input.agentSteps || null,
+      attachments: input.attachments || null,
+      file_diffs: input.fileDiffs || null,
+      safety_block: input.safetyBlock || null,
+      sender_id: input.senderId || null,
+    };
+    if (input.id) {
+      insertData.id = input.id;
+    }
+
     const { data, error } = await supabase
       .from("chat_messages")
-      .insert({
-        thread_id: input.threadId,
-        role: input.role,
-        content: input.content || "",
-        model: input.model || null,
-        tokens_used: input.tokensUsed || null,
-        context_refs: input.contextRefs || null,
-        agent_steps: input.agentSteps || null,
-        attachments: input.attachments || null,
-        file_diffs: input.fileDiffs || null,
-        safety_block: input.safetyBlock || null,
-        sender_id: input.senderId || null,
-      })
+      .insert(insertData)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return this.mapMessage(data);
+  }
+
+  async updateMessage(
+    id: string,
+    input: { content?: string; tokensUsed?: number; agentSteps?: readonly AgentStep[] }
+  ): Promise<ChatMessage> {
+    const supabase = this.checkConfig();
+
+    const updateData: any = {};
+    if (input.content !== undefined) updateData.content = input.content;
+    if (input.tokensUsed !== undefined) updateData.tokens_used = input.tokensUsed;
+    if (input.agentSteps !== undefined) updateData.agent_steps = input.agentSteps;
+
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .update(updateData)
+      .eq("id", id)
       .select()
       .single();
 

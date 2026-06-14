@@ -304,7 +304,7 @@ export class DraftRestoreController {
     if (!leftDraft) {
       leftDraft = await vscode.window.showQuickPick(availableDrafts, {
         title: "Compare Drafts",
-        placeHolder: "Choose the first draft"
+        placeHolder: "Choose the first draft (Before)"
       });
       if (!leftDraft) {
         return;
@@ -318,7 +318,7 @@ export class DraftRestoreController {
         ),
         {
           title: "Compare Drafts",
-          placeHolder: "Choose the second draft"
+          placeHolder: "Choose the second draft (After)"
         }
       );
       if (!rightDraft) {
@@ -326,21 +326,87 @@ export class DraftRestoreController {
       }
     }
 
-    const comparison = await this.wsClient.compareDrafts(
-      leftDraft.draft.draft.id,
-      rightDraft.draft.draft.id
-    );
-    const diffDocument = await vscode.workspace.openTextDocument({
-      language: "diff",
-      content:
-        comparison.diff.length > 0
-          ? comparison.diff
-          : "No content differences were found between the selected drafts.\n"
-    });
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      void vscode.window.showErrorMessage("No open workspace folder found.");
+      return;
+    }
 
-    await vscode.window.showTextDocument(diffDocument, {
-      preview: false
-    });
+    try {
+      let fullLeftDraft = leftDraft.draft.draft;
+      if (leftDraft.draft.source === "remote") {
+        fullLeftDraft = await this.wsClient.getDraft(leftDraft.draft.draft.id);
+      }
+      let fullRightDraft = rightDraft.draft.draft;
+      if (rightDraft.draft.source === "remote") {
+        fullRightDraft = await this.wsClient.getDraft(rightDraft.draft.draft.id);
+      }
+
+      const draftManager = this.wsClient.getDraftManager();
+      const leftFiles = draftManager.readFilesFromDraft(fullLeftDraft);
+      const rightFiles = draftManager.readFilesFromDraft(fullRightDraft);
+
+      const allPaths = [...new Set([...leftFiles.keys(), ...rightFiles.keys()])].sort((a, b) =>
+        a.localeCompare(b)
+      );
+
+      const tempDir = vscode.Uri.joinPath(workspaceFolder.uri, ".conduit", "compare-temp");
+      try {
+        await vscode.workspace.fs.delete(tempDir, { recursive: true, useTrash: false });
+      } catch {}
+      await vscode.workspace.fs.createDirectory(tempDir);
+
+      const encoder = new TextEncoder();
+      await vscode.workspace.fs.writeFile(
+        vscode.Uri.joinPath(tempDir, ".gitignore"),
+        encoder.encode("*")
+      );
+
+      const diffUris: { left: vscode.Uri; right: vscode.Uri; relativePath: string }[] = [];
+
+      for (const relativePath of allPaths) {
+        const leftContent = leftFiles.get(relativePath) ?? "";
+        const rightContent = rightFiles.get(relativePath) ?? "";
+
+        if (leftContent === rightContent) {
+          continue;
+        }
+
+        const sanitizedPath = relativePath.replace(/[\/\\:\*\?\"<>\|]/g, "_");
+        const leftTempUri = vscode.Uri.joinPath(tempDir, `left_${sanitizedPath}`);
+        const rightTempUri = vscode.Uri.joinPath(tempDir, `right_${sanitizedPath}`);
+
+        await vscode.workspace.fs.writeFile(leftTempUri, encoder.encode(leftContent));
+        await vscode.workspace.fs.writeFile(rightTempUri, encoder.encode(rightContent));
+
+        diffUris.push({
+          left: leftTempUri,
+          right: rightTempUri,
+          relativePath
+        });
+      }
+
+      if (diffUris.length === 0) {
+        void vscode.window.showInformationMessage("No content differences were found between the selected drafts.");
+        return;
+      }
+
+      for (const diff of diffUris) {
+        const title = `${path.basename(diff.relativePath)}: Draft ${fullLeftDraft.id} ↔ Draft ${fullRightDraft.id}`;
+        await vscode.commands.executeCommand("vscode.diff", diff.left, diff.right, title);
+      }
+
+      void vscode.window.showInformationMessage(
+        `Opened split-screen comparison for ${diffUris.length} file(s) between Draft ${fullLeftDraft.id} and Draft ${fullRightDraft.id}.`
+      );
+
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Failed to compare drafts: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   private async loadDraftItems(): Promise<readonly DraftQuickPickItem[]> {
@@ -496,4 +562,165 @@ export class DraftRestoreController {
       void vscode.window.showErrorMessage(`Failed to launch interactive merge: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+
+  public async promptToRestoreSessionDrafts(sessionId: string): Promise<boolean> {
+    await this.wsClient.recoverLocalFallbacks();
+    const drafts = await this.wsClient.discoverDrafts();
+
+    const sessionDrafts = drafts.filter((draft) => {
+      return draft.draft.sessionId === sessionId && draft.draft.status === "active";
+    });
+
+    if (sessionDrafts.length === 0) {
+      return false;
+    }
+
+    const draftItems = await Promise.all(
+      sessionDrafts.map(async (draft): Promise<DraftQuickPickItem> => {
+        const freshness = await this.safeCheckDraftFreshness(
+          draft.draft.id,
+          draft.draft.branch
+        );
+        const currentBranch = await this.wsClient.getCurrentBranch();
+        const isCurrentBranch = currentBranch === draft.draft.branch;
+
+        return {
+          label: `${isCurrentBranch ? "$(git-branch) " : ""}${draft.draft.id}`,
+          description: `${draft.draft.branch} • session ${draft.draft.sessionId}`,
+          detail: `Created: ${new Date(draft.draft.createdAt).toLocaleString()} • ${freshness.status} • ${freshness.reason}`,
+          picked: isCurrentBranch,
+          draft,
+          freshness
+        };
+      })
+    );
+
+    const selectedDraft = await vscode.window.showQuickPick(draftItems, {
+      title: "Restore Session Draft",
+      placeHolder: "Select a previous draft from this session to view changes and restore"
+    });
+
+    if (!selectedDraft) {
+      return true; // Prompted, but user chose not to proceed
+    }
+
+    await this.showBeforeAfterChanges(selectedDraft);
+    return true;
+  }
+
+  private async showBeforeAfterChanges(draftItem: DraftQuickPickItem): Promise<void> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      void vscode.window.showErrorMessage("No open workspace folder found.");
+      return;
+    }
+
+    try {
+      let fullDraft = draftItem.draft.draft;
+      if (draftItem.draft.source === "remote") {
+        fullDraft = await this.wsClient.getDraft(draftItem.draft.draft.id);
+      }
+      const draftManager = this.wsClient.getDraftManager();
+      const draftFiles = draftManager.readFilesFromDraft(fullDraft);
+
+      const tempDir = vscode.Uri.joinPath(workspaceFolder.uri, ".conduit", "diff-temp");
+      // Clean up previous temp files first if any exist
+      try {
+        await vscode.workspace.fs.delete(tempDir, { recursive: true, useTrash: false });
+      } catch {}
+
+      await vscode.workspace.fs.createDirectory(tempDir);
+
+      const encoder = new TextEncoder();
+      await vscode.workspace.fs.writeFile(
+        vscode.Uri.joinPath(tempDir, ".gitignore"),
+        encoder.encode("*")
+      );
+
+      const diffUris: { left: vscode.Uri; right: vscode.Uri; relativePath: string }[] = [];
+
+      for (const [relativePath, remoteContent] of draftFiles.entries()) {
+        const fileUri = vscode.Uri.joinPath(workspaceFolder.uri, relativePath);
+
+        // Read local content
+        let localContent = "";
+        let hasLocal = false;
+        try {
+          const localBytes = await vscode.workspace.fs.readFile(fileUri);
+          localContent = new TextDecoder().decode(localBytes);
+          hasLocal = true;
+        } catch {
+          // File does not exist locally yet
+        }
+
+        if (hasLocal && localContent === remoteContent) {
+          continue;
+        }
+
+        // Write remote/draft content to temp file
+        const sanitizedPath = relativePath.replace(/[\/\\:\*\?\"<>\|]/g, "_");
+        const tempFileUri = vscode.Uri.joinPath(tempDir, `draft_${sanitizedPath}`);
+        await vscode.workspace.fs.writeFile(tempFileUri, encoder.encode(remoteContent));
+
+        let leftUri: vscode.Uri;
+        if (hasLocal) {
+          leftUri = fileUri;
+        } else {
+          const emptyTempUri = vscode.Uri.joinPath(tempDir, `empty_${sanitizedPath}`);
+          await vscode.workspace.fs.writeFile(emptyTempUri, encoder.encode(""));
+          leftUri = emptyTempUri;
+        }
+
+        diffUris.push({
+          left: leftUri,
+          right: tempFileUri,
+          relativePath
+        });
+      }
+
+      if (diffUris.length === 0) {
+        const choice = await vscode.window.showInformationMessage(
+          "No content differences found between your workspace and the draft. Apply the draft anyway?",
+          "Apply",
+          "Cancel"
+        );
+        if (choice === "Apply") {
+          await this.restoreDraft(draftItem, "merge");
+        }
+        try {
+          await vscode.workspace.fs.delete(tempDir, { recursive: true, useTrash: false });
+        } catch {}
+        return;
+      }
+
+      // Open split-screen diffs for all differing files
+      for (const diff of diffUris) {
+        const title = `${path.basename(diff.relativePath)}: Workspace ↔ Draft`;
+        await vscode.commands.executeCommand("vscode.diff", diff.left, diff.right, title);
+      }
+
+      const choice = await vscode.window.showInformationMessage(
+        `Opened split-screen changes for ${diffUris.length} file(s). Do you want to accept and restore this draft?`,
+        "Accept & Restore",
+        "Decline"
+      );
+
+      if (choice === "Accept & Restore") {
+        await this.restoreDraft(draftItem, "merge");
+      }
+
+      // Clean up temp directory
+      try {
+        await vscode.workspace.fs.delete(tempDir, { recursive: true, useTrash: false });
+      } catch {}
+
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Failed to show before/after changes: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
 }
+

@@ -57,7 +57,7 @@ type WebviewIncoming =
   | { type: 'setApiKey'; provider: string; key: string };
 
 type WebviewOutgoing =
-  | { type: 'init'; threads: ChatThread[]; activeThreadId: string; messages: ChatMessage[]; snapshot: CollaborationSnapshot; providerStatus: ProviderStatus; mode: 'ask' | 'agent'; pinnedFiles: string[]; tokenBudget?: number; currentUser?: { id: string; email: string | undefined } | undefined }
+  | { type: 'init'; threads: ChatThread[]; activeThreadId: string; messages: ChatMessage[]; snapshot: CollaborationSnapshot; providerStatus: ProviderStatus; mode: 'ask' | 'agent'; pinnedFiles: string[]; tokenBudget?: number; currentUser?: { id: string; email: string | undefined } | undefined; cooldownUser?: string | null; cooldownUserName?: string | null }
   | { type: 'threadCreated'; thread: ChatThread; messages: ChatMessage[]; threads?: ChatThread[] }
   | { type: 'threadSelected'; thread: ChatThread; messages: ChatMessage[]; threads?: ChatThread[] }
   | { type: 'messageAdded'; message: ChatMessage }
@@ -74,7 +74,8 @@ type WebviewOutgoing =
   | { type: 'contextTokens'; count: number }
   | { type: 'agentPaused'; messageId: string }
   | { type: 'agentResumed'; messageId: string }
-  | { type: 'visionSupport'; supported: boolean };
+  | { type: 'visionSupport'; supported: boolean }
+  | { type: 'aiStatusChanged'; executingUser: string | null; executingUserName: string | null };
 
 interface ProviderStatus {
   activeProvider: string;
@@ -127,6 +128,18 @@ export class ChatPanelProvider
   private agentPausedMessageId: string | null = null;
 
   private activeDocListener: Y.Doc | undefined = undefined;
+
+  private aiStatusObserver = (event: Y.YMapEvent<any>) => {
+    const activeDoc = this.wsClient.getActiveDoc();
+    if (!activeDoc) return;
+    const aiStatusMap = activeDoc.getMap<any>('ai-status');
+    const executingUser = aiStatusMap.get('executingUser');
+    this.post({
+      type: 'aiStatusChanged',
+      executingUser: executingUser?.id ?? null,
+      executingUserName: executingUser?.name ?? null
+    });
+  };
 
   private chatArrayObserver = (event: Y.YArrayEvent<string>) => {
     const activeDoc = this.wsClient.getActiveDoc();
@@ -264,6 +277,9 @@ export class ChatPanelProvider
     
     const threadsArray = activeDoc.getArray<string>('chat-threads');
     threadsArray.observe(this.threadsArrayObserver);
+
+    const aiStatusMap = activeDoc.getMap<any>('ai-status');
+    aiStatusMap.observe(this.aiStatusObserver);
     
     this.activeDocListener = activeDoc;
     
@@ -316,8 +332,17 @@ export class ChatPanelProvider
         const threadsArray = this.activeDocListener.getArray<string>('chat-threads');
         threadsArray.unobserve(this.threadsArrayObserver);
       } catch {}
+      try {
+        const aiStatusMap = this.activeDocListener.getMap<any>('ai-status');
+        aiStatusMap.unobserve(this.aiStatusObserver);
+      } catch {}
       this.activeDocListener = undefined;
     }
+    this.post({
+      type: 'aiStatusChanged',
+      executingUser: null,
+      executingUserName: null
+    });
   }
 
   private async apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -705,6 +730,21 @@ export class ChatPanelProvider
     if (this.activeStreamsByThread.has(threadId)) return;
     this.activeStreamsByThread.add(threadId);
 
+    const activeDoc = this.wsClient.getActiveDoc();
+    if (activeDoc) {
+      const aiStatusMap = activeDoc.getMap<any>('ai-status');
+      const executingUser = aiStatusMap.get('executingUser');
+      const authState = await this.authService.getState();
+      if (executingUser && executingUser.id !== authState.user?.id) {
+        this.post({ type: 'error', message: 'An AI response is already in progress for another user. Please wait.' });
+        this.activeStreamsByThread.delete(threadId);
+        return;
+      }
+      const localUserId = authState.user?.id ?? 'anonymous';
+      const localUserName = authState.user?.username ?? authState.user?.email ?? 'anonymous';
+      aiStatusMap.set('executingUser', { id: localUserId, name: localUserName });
+    }
+
     try {
       // Auto-detect intent if mode was not manually set
       const detectedMode = IntentRouter.classify(content);
@@ -756,7 +796,6 @@ export class ChatPanelProvider
       }
 
       // Push user message to Yjs array
-      const activeDoc = this.wsClient.getActiveDoc();
       if (activeDoc) {
         const chatArray = activeDoc.getArray<string>('chat-messages');
         chatArray.push([JSON.stringify(userMsg)]);
@@ -794,6 +833,14 @@ export class ChatPanelProvider
       }
     } finally {
       this.activeStreamsByThread.delete(threadId);
+      if (activeDoc) {
+        const aiStatusMap = activeDoc.getMap<any>('ai-status');
+        const executingUser = aiStatusMap.get('executingUser');
+        const authState = await this.authService.getState();
+        if (executingUser && executingUser.id === authState.user?.id) {
+          aiStatusMap.delete('executingUser');
+        }
+      }
     }
   }
 
@@ -1424,6 +1471,18 @@ export class ChatPanelProvider
     if (this.threads.length === 0) {
       await this.createNewThread();
     }
+    const activeDoc = this.wsClient.getActiveDoc();
+    let executingUserId: string | null = null;
+    let executingUserName: string | null = null;
+    if (activeDoc) {
+      const aiStatusMap = activeDoc.getMap<any>('ai-status');
+      const executingUser = aiStatusMap.get('executingUser');
+      if (executingUser) {
+        executingUserId = executingUser.id;
+        executingUserName = executingUser.name;
+      }
+    }
+
     const activeId = this.activeThreadId ?? this.threads[0]!.id;
     this.post({
       type: 'init',
@@ -1435,6 +1494,8 @@ export class ChatPanelProvider
       mode: this.mode,
       pinnedFiles: this.pinnedFiles,
       currentUser: authState.user ? { id: authState.user.id, email: authState.user.email } : undefined,
+      cooldownUser: executingUserId,
+      cooldownUserName: executingUserName,
     });
 
     if (this.snapshot.state === 'connected') {
@@ -1855,7 +1916,9 @@ export class ChatPanelProvider
       pendingImages: [],      // ImageAttachment[] staged for next send
       agentPaused: false,     // true while agent is suspended
       pausedMessageId: null,  // messageId of the paused agent message
-      visionSupported: false  // set by checkVisionSupport response
+      visionSupported: false, // set by checkVisionSupport response
+      cooldownUser: null,
+      cooldownUserName: null
     };
 
     // ── Helpers ──
@@ -2753,11 +2816,21 @@ export class ChatPanelProvider
         btnSend.disabled = !text && state.pendingImages.length === 0;
       }
 
+      const isCooldown = state.cooldownUser && state.cooldownUser !== (state.currentUser ? state.currentUser.id : null);
+      if (isCooldown) {
+        btnSend.disabled = true;
+        btnSend.title = \`AI is busy responding to \${state.cooldownUserName || 'another user'}\`;
+      }
+
       const textarea = document.getElementById('chat-input');
-      textarea.disabled = !!(state.streamingId && !state.agentPaused);
-      textarea.placeholder = state.mode === 'agent' 
-        ? 'Describe a task… (Agent will plan + edit)' 
-        : 'Ask about your codebase…';
+      textarea.disabled = !!(state.streamingId && !state.agentPaused) || !!isCooldown;
+      if (isCooldown) {
+        textarea.placeholder = \`AI is responding to \${state.cooldownUserName || 'another user'}...\`;
+      } else {
+        textarea.placeholder = state.mode === 'agent' 
+          ? 'Describe a task… (Agent will plan + edit)' 
+          : 'Ask about your codebase…';
+      }
     };
 
     const sendMessage = () => {
@@ -3145,6 +3218,8 @@ export class ChatPanelProvider
           state.pinnedFiles = msg.pinnedFiles || [];
           state.snapshot = msg.snapshot;
           state.currentUser = msg.currentUser;
+          state.cooldownUser = msg.cooldownUser || null;
+          state.cooldownUserName = msg.cooldownUserName || null;
           updateHeader();
           updateWarning();
           updatePinnedFiles();
@@ -3248,6 +3323,12 @@ export class ChatPanelProvider
               : m
           );
           updateChatHistory();
+          updateInputArea();
+          break;
+
+        case 'aiStatusChanged':
+          state.cooldownUser = msg.executingUser || null;
+          state.cooldownUserName = msg.executingUserName || null;
           updateInputArea();
           break;
 

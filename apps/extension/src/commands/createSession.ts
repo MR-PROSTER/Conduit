@@ -15,7 +15,23 @@ export const createSessionCommand = (
   return vscode.commands.registerCommand("conduit.createSession", async () => {
     try {
       const auth = await services.authService.requireState();
-      const state = getStateManager().get();
+      const stateManager = getStateManager();
+      let state = stateManager.get();
+
+      if (state.state === "IN_ROOM_IN_SESSION") {
+        const leaveAction = await vscode.window.showWarningMessage(
+          "You are already in an active session. Would you like to leave it before continuing?",
+          { modal: true },
+          "Leave and Continue",
+          "Cancel"
+        );
+        if (leaveAction !== "Leave and Continue") {
+          return;
+        }
+        await vscode.commands.executeCommand("conduit.leaveSession");
+        state = stateManager.get();
+      }
+
       if (state.state !== "IN_ROOM_NO_SESSION") {
         throw new Error("Create or join a room before creating a session.");
       }

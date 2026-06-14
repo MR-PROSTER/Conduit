@@ -739,4 +739,34 @@ export class GitService implements IGitService {
       ...(details.cause === undefined ? {} : { cause: details.cause })
     };
   }
+
+  public async checkIsContributor(authorEmails: string[]): Promise<boolean> {
+    await this.ensureRepository();
+    const localEmails = [...authorEmails];
+    try {
+      const gitEmail = (await this.runGit(["config", "user.email"])).stdout.trim();
+      if (gitEmail) {
+        localEmails.push(gitEmail);
+      }
+      const gitName = (await this.runGit(["config", "user.name"])).stdout.trim();
+      if (gitName) {
+        localEmails.push(gitName);
+      }
+    } catch {}
+
+    for (const email of localEmails) {
+      if (!email || email.trim().length === 0) {
+        continue;
+      }
+      try {
+        const result = await this.runGit(["log", `--author=${email.trim()}`, "--max-count=1", "--format=%H"]);
+        if (result.stdout.trim().length > 0) {
+          return true;
+        }
+      } catch {
+        // Ignore and try next
+      }
+    }
+    return false;
+  }
 }

@@ -82,7 +82,7 @@ export const leaveSessionCommand = (
                 cancellable: false
               },
               async () => {
-                await services.wsClient.saveDraftFromSession();
+                await services.wsClient.saveDraftFromSession({ onlyRemote: true });
               }
             );
             await services.wsClient.disconnect();

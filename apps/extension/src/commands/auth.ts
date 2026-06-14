@@ -39,15 +39,33 @@ export const signOutCommand = (
       }
 
       if (current.state === "IN_ROOM_IN_SESSION") {
-        await vscode.commands.executeCommand("conduit.leaveSession");
-        if (getStateManager().get().state === "IN_ROOM_IN_SESSION") {
-          return;
+        try {
+          await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: "Saving collaborative draft before signing out…",
+              cancellable: false
+            },
+            async () => {
+              await services.wsClient.saveDraftFromSession({ onlyRemote: true });
+            }
+          );
+        } catch (error) {
+          void vscode.window.showErrorMessage(
+            `Failed to save draft during sign out: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
         }
+        await services.wsClient.disconnect();
+        getStateManager().clearSession();
       }
 
-      if (current.state === "IN_ROOM_NO_SESSION") {
+      if (current.state === "IN_ROOM_NO_SESSION" || current.state === "IN_ROOM_IN_SESSION") {
         await services.wsClient.disconnect();
-        getStateManager().clearRoom();
+        try {
+          getStateManager().clearRoom();
+        } catch {}
       }
 
       await services.authService.signOut();

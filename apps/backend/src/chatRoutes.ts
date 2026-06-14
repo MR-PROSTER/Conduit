@@ -39,7 +39,7 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
   router.post("/chat/threads", async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { sessionId, type, name, forkedFromMessageId } = req.body;
+      const { id, sessionId, type, name, forkedFromMessageId } = req.body;
       const service = getPermissionService();
 
       // If session is provided, verify room permission first
@@ -61,6 +61,7 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
       }
 
       const thread = await repo.createThread({
+        id,
         sessionId,
         type,
         name,
@@ -154,6 +155,7 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
       }
 
       const {
+        id,
         role,
         content,
         model,
@@ -170,6 +172,7 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
       }
 
       const message = await repo.appendMessage({
+        id,
         threadId,
         role,
         content: content || "",
@@ -184,6 +187,39 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
       });
 
       res.status(201).json({ message });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  // PATCH /chat/threads/:threadId/messages/:messageId → update message
+  router.patch("/chat/threads/:threadId/messages/:messageId", async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const threadId = req.params.threadId as string;
+      const messageId = req.params.messageId as string;
+      const supabase = getSupabaseClient();
+      if (!supabase) throw new Error("Supabase client not initialized");
+
+      // Check access permission via Postgres RPC function `is_thread_member`
+      const { data: isMember, error: accessError } = await supabase.rpc("is_thread_member", {
+        p_thread_id: threadId,
+        p_user_id: user.id,
+      });
+
+      if (accessError || !isMember) {
+        return res.status(403).json({ error: "You do not have access to this chat thread" });
+      }
+
+      const { content, tokensUsed, agentSteps } = req.body;
+
+      const message = await repo.updateMessage(messageId, {
+        content,
+        tokensUsed,
+        agentSteps,
+      });
+
+      res.json({ message });
     } catch (error) {
       sendError(res, error);
     }

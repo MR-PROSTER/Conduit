@@ -228,7 +228,17 @@ const initializeStartup = async (services: {
                     "info",
                     "Restored branch-scoped collaborative session"
                 );
-                void draftRestoreController.promptToRestoreUnresolvedDrafts();
+                if (realtimeState.session) {
+                    draftRestoreController.promptToRestoreSessionDrafts(
+                        realtimeState.session.id
+                    ).then((prompted) => {
+                        if (!prompted) {
+                            void draftRestoreController.promptToRestoreUnresolvedDrafts();
+                        }
+                    });
+                } else {
+                    void draftRestoreController.promptToRestoreUnresolvedDrafts();
+                }
             }
         }
     } catch (error) {

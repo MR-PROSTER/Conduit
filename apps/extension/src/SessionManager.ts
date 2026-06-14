@@ -718,7 +718,7 @@ export class SessionManager implements vscode.Disposable {
     return commitResult;
   }
 
-  public async saveDraftFromSession(): Promise<Draft> {
+  public async saveDraftFromSession(options?: { readonly onlyRemote?: boolean }): Promise<Draft> {
     this.ensureNotDisposed();
     const session = this.requireActiveSession();
     const draftManager = this.getDraftManager(session.repoPath);
@@ -731,7 +731,7 @@ export class SessionManager implements vscode.Disposable {
       }
     );
 
-    const draft = await draftManager.saveDraft({
+    const draftData = {
       draftId: session.session.id,
       sessionId: session.session.id,
       roomId: session.room.id,
@@ -740,13 +740,33 @@ export class SessionManager implements vscode.Disposable {
       createdBy: session.localUserId,
       ydoc: session.doc,
       filesystemOps: this.getFilesystemOperationsFromSession(session),
-      aiEvents: [],
+      aiEvents: [] as string[],
       ...(existingDraft
         ? {
           lineage: existingDraft.draft.lineage ?? existingDraft.draft.id
         }
         : {})
-    });
+    };
+
+    let draft: Draft;
+    if (options?.onlyRemote) {
+      draft = {
+        id: draftData.draftId,
+        sessionId: draftData.sessionId,
+        roomId: draftData.roomId,
+        branch: draftData.branch,
+        baseCommitHash: draftData.baseCommitHash,
+        yjsState: Buffer.from(Y.encodeStateAsUpdate(draftData.ydoc)).toString("base64"),
+        filesystemOps: [...draftData.filesystemOps],
+        aiEvents: [...draftData.aiEvents],
+        createdBy: draftData.createdBy,
+        createdAt: new Date().toISOString(),
+        status: "active",
+        ...(draftData.lineage ? { lineage: draftData.lineage } : {})
+      };
+    } else {
+      draft = await draftManager.saveDraft(draftData);
+    }
 
     const token = await this.getFreshToken() || session.accessToken;
     const persistedDraft =
@@ -754,18 +774,20 @@ export class SessionManager implements vscode.Disposable {
         ? await this.remoteDraftSaver(draft, token)
         : draft;
 
-    this.branchSessionRegistry.upsertDraft({
-      id: persistedDraft.id,
-      branch: persistedDraft.branch,
-      status: persistedDraft.status,
-      sessionId: persistedDraft.sessionId,
-      createdBy: persistedDraft.createdBy,
-      createdAt: persistedDraft.createdAt,
-      workspacePath: this.getDraftWorkspacePath(
-        session.repoPath,
-        persistedDraft.id
-      )
-    });
+    if (!options?.onlyRemote) {
+      this.branchSessionRegistry.upsertDraft({
+        id: persistedDraft.id,
+        branch: persistedDraft.branch,
+        status: persistedDraft.status,
+        sessionId: persistedDraft.sessionId,
+        createdBy: persistedDraft.createdBy,
+        createdAt: persistedDraft.createdAt,
+        workspacePath: this.getDraftWorkspacePath(
+          session.repoPath,
+          persistedDraft.id
+        )
+      });
+    }
 
     this.broadcastHub.log(
       "info",

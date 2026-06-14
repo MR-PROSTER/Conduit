@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 
 import type { Room } from "@conduit/shared-types";
+import { GitService } from "@conduit/git-core";
 
 import type { ExtensionServices } from "../extension.js";
 import { getStateManager } from "../state/ExtensionStateManager.js";
@@ -73,6 +74,24 @@ export const joinRoomCommand = (
   return vscode.commands.registerCommand("conduit.joinRoom", async () => {
     try {
       const auth = await services.authService.requireState();
+      const stateManager = getStateManager();
+      const state = stateManager.get();
+      if (state.state === "IN_ROOM_NO_SESSION" || state.state === "IN_ROOM_IN_SESSION") {
+        const leaveAction = await vscode.window.showWarningMessage(
+          `You are already in room "${state.room?.name || "another room"}". Would you like to leave it before continuing?`,
+          { modal: true },
+          "Leave and Continue",
+          "Cancel"
+        );
+        if (leaveAction !== "Leave and Continue") {
+          return;
+        }
+        await vscode.commands.executeCommand("conduit.leaveRoom");
+        if (stateManager.get().state !== "SIGNED_IN_NO_ROOM") {
+          return;
+        }
+      }
+
       const rooms = await listRooms(services, auth.accessToken);
 
       const items = [
@@ -111,14 +130,37 @@ export const joinRoomCommand = (
       }
 
       const localRepoUrl = await services.wsClient.getRepoRemoteUrl();
-      if (
-        localRepoUrl &&
-        roomToJoin.repoUrl &&
-        localRepoUrl.trim() !== roomToJoin.repoUrl.trim()
-      ) {
+      const expectedRepoUrl = roomToJoin.repoUrl?.trim();
+      if (!localRepoUrl) {
         void vscode.window.showWarningMessage(
-          `This room was created for ${roomToJoin.repoUrl}, but your local remote is ${localRepoUrl}. Joining anyway.`
+          `Warning: No repository remote URL found. To join this room, you should open the respective repository (${expectedRepoUrl || "unknown repository"}).`
         );
+      } else if (expectedRepoUrl && localRepoUrl.trim() !== expectedRepoUrl) {
+        void vscode.window.showWarningMessage(
+          `Warning: Your open repository (${localRepoUrl}) does not match this room's repository (${expectedRepoUrl}). Please make sure you are in the respective repository.`
+        );
+      } else if (localRepoUrl && expectedRepoUrl && localRepoUrl.trim() === expectedRepoUrl) {
+        const repoPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (repoPath) {
+          try {
+            const git = new GitService({ repoPath });
+            const emailsToCheck: string[] = [];
+            if (auth.user.email) {
+              emailsToCheck.push(auth.user.email);
+            }
+            if (auth.user.username) {
+              emailsToCheck.push(auth.user.username);
+            }
+            const isContributor = await git.checkIsContributor(emailsToCheck);
+            if (!isContributor) {
+              void vscode.window.showWarningMessage(
+                "Warning: You are not a contributor to this repository. In order to collaborate, one must be a contributor to the repository."
+              );
+            }
+          } catch (err) {
+            // Ignore Git check errors
+          }
+        }
       }
 
       getStateManager().setRoom(roomToJoin);

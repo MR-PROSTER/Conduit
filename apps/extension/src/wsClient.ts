@@ -180,8 +180,8 @@ export class ConduitWebSocketClient implements vscode.Disposable {
     return this.sessionManager.commitSession(message);
   }
 
-  public async saveDraftFromSession(): Promise<Draft> {
-    return this.sessionManager.saveDraftFromSession();
+  public async saveDraftFromSession(options?: { readonly onlyRemote?: boolean }): Promise<Draft> {
+    return this.sessionManager.saveDraftFromSession(options);
   }
 
   public async discardSession(): Promise<void> {

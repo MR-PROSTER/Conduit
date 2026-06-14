@@ -86,4 +86,5 @@ export interface IGitService {
   createBranch(name: string, options?: GitCreateBranchOptions): Promise<GitBranchReference>;
   commitCount(fromRef?: string, toRef?: string): Promise<number>;
   show(ref: string, relativePath: string): Promise<string>;
+  checkIsContributor(authorEmails: string[]): Promise<boolean>;
 }

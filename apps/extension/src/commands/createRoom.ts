@@ -12,6 +12,24 @@ export const createRoomCommand = (
   return vscode.commands.registerCommand("conduit.createRoom", async () => {
     try {
       const auth = await services.authService.requireState();
+      const stateManager = getStateManager();
+      const state = stateManager.get();
+      if (state.state === "IN_ROOM_NO_SESSION" || state.state === "IN_ROOM_IN_SESSION") {
+        const leaveAction = await vscode.window.showWarningMessage(
+          `You are already in room "${state.room?.name || "another room"}". Would you like to leave it before continuing?`,
+          { modal: true },
+          "Leave and Continue",
+          "Cancel"
+        );
+        if (leaveAction !== "Leave and Continue") {
+          return;
+        }
+        await vscode.commands.executeCommand("conduit.leaveRoom");
+        if (stateManager.get().state !== "SIGNED_IN_NO_ROOM") {
+          return;
+        }
+      }
+
       const name = await vscode.window.showInputBox({
         prompt: "Room name",
         placeHolder: "e.g. ProjectAlpha"
