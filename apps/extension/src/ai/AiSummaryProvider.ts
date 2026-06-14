@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as Y from "yjs";
-import type { ChatMessage } from "@conduit/shared-types";
+import type { ChatMessage, ChatThread } from "@conduit/shared-types";
 import type { ConduitWebSocketClient } from "../wsClient.js";
 import type { BroadcastHub } from "../broadcast.js";
 import type { AuthService } from "../AuthService.js";
@@ -111,16 +111,73 @@ export class AiSummaryProvider implements vscode.WebviewViewProvider, vscode.Dis
                 void this.refresh();
                 break;
             case "openDiff":
-                if (message.stepId && message.messageId) {
+                if (message.diff) {
+                    await this.openDiffEditorDirect(message.diff);
+                } else if (message.stepId && message.messageId) {
                     await this.openDiffEditor(message.stepId, message.messageId);
                 }
                 break;
+            case "openFile":
+                if (message.filePath) {
+                    await this.openFile(message.filePath);
+                }
+                break;
+        }
+    }
+
+    private async openFile(filePath: string): Promise<void> {
+        try {
+            const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+            const path = await import("node:path");
+            let absPath = filePath;
+            if (!path.isAbsolute(filePath)) {
+                absPath = path.join(root, filePath);
+            }
+            const uri = vscode.Uri.file(absPath);
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc, {
+                viewColumn: vscode.ViewColumn.One,
+                preserveFocus: false,
+                preview: false,
+            });
+        } catch (err) {
+            vscode.window.showErrorMessage(`AI Summary: Could not open file "${filePath}": ${err instanceof Error ? err.message : String(err)}`);
+            console.error("Failed to open file in AI Summary:", err);
+        }
+    }
+
+    private async openDiffEditorDirect(diff: any): Promise<void> {
+        const os = await import("node:os");
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+        try {
+            const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+            const absPath = path.join(root, diff.filePath);
+            const beforeLines: string[] = [];
+            for (const hunk of diff.hunks || []) {
+                for (const line of hunk.lines || []) {
+                    if (line.type === "del" || line.type === "ctx") {
+                        beforeLines.push(line.content);
+                    }
+                }
+            }
+            const beforeContent = beforeLines.join("\n");
+            const tmpDir = os.tmpdir();
+            const tmpFile = path.join(tmpDir, `conduit-before-${Date.now()}-${path.basename(diff.filePath)}`);
+            await fs.writeFile(tmpFile, beforeContent, "utf-8");
+            const beforeUri = vscode.Uri.file(tmpFile);
+            const afterUri = vscode.Uri.file(absPath);
+            const title = `${path.basename(diff.filePath)}: Before ↔ After (Agent Edit)`;
+            await vscode.commands.executeCommand("vscode.diff", beforeUri, afterUri, title);
+        } catch (err) {
+            vscode.window.showErrorMessage(`AI Summary Error: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 
     private async openDiffEditor(stepId: string, messageId: string): Promise<void> {
         const activeDoc = this.wsClient.getActiveDoc();
         if (!activeDoc) {
+            vscode.window.showErrorMessage("AI Summary: No active document found.");
             return;
         }
 
@@ -131,41 +188,55 @@ export class AiSummaryProvider implements vscode.WebviewViewProvider, vscode.Dis
             }).filter((m): m is ChatMessage => m !== null);
 
             const targetMsg = messages.find((m) => m.id === messageId);
-            const step = targetMsg?.agentSteps?.find((s) => s.id === stepId);
-            if (step?.diff) {
-                const os = await import("node:os");
-                const fs = await import("node:fs/promises");
-                const path = await import("node:path");
+            if (!targetMsg) {
+                vscode.window.showErrorMessage(`AI Summary: Could not find chat message with ID ${messageId}`);
+                return;
+            }
 
-                const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-                const absPath = path.join(root, step.diff.filePath);
+            const step = targetMsg.agentSteps?.find((s) => s.id === stepId);
+            if (!step) {
+                vscode.window.showErrorMessage(`AI Summary: Could not find agent step with ID ${stepId}`);
+                return;
+            }
 
-                // Read current (after-edit) content from disk
-                const afterContent = await fs.readFile(absPath, "utf-8").catch(() => "");
+            if (!step.diff) {
+                vscode.window.showErrorMessage("AI Summary: The selected agent step does not contain any diff changes.");
+                return;
+            }
 
-                // Reconstruct before-content from the diff hunks
-                const beforeLines: string[] = [];
-                for (const hunk of step.diff.hunks) {
-                    for (const line of hunk.lines) {
-                        if (line.type === "del" || line.type === "ctx") {
-                            beforeLines.push(line.content);
-                        }
+            const os = await import("node:os");
+            const fs = await import("node:fs/promises");
+            const path = await import("node:path");
+
+            const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+            const absPath = path.join(root, step.diff.filePath);
+
+            // Read current (after-edit) content from disk
+            const afterContent = await fs.readFile(absPath, "utf-8").catch(() => "");
+
+            // Reconstruct before-content from the diff hunks
+            const beforeLines: string[] = [];
+            for (const hunk of step.diff.hunks) {
+                for (const line of hunk.lines) {
+                    if (line.type === "del" || line.type === "ctx") {
+                        beforeLines.push(line.content);
                     }
                 }
-                const beforeContent = beforeLines.join("\n");
-
-                // Write before-content to a temp file
-                const tmpDir = os.tmpdir();
-                const tmpFile = path.join(tmpDir, `conduit-before-${Date.now()}-${path.basename(step.diff.filePath)}`);
-                await fs.writeFile(tmpFile, beforeContent, "utf-8");
-
-                const beforeUri = vscode.Uri.file(tmpFile);
-                const afterUri = vscode.Uri.file(absPath);
-                const title = `${path.basename(step.diff.filePath)}: Before ↔ After (Agent Edit)`;
-
-                await vscode.commands.executeCommand("vscode.diff", beforeUri, afterUri, title);
             }
+            const beforeContent = beforeLines.join("\n");
+
+            // Write before-content to a temp file
+            const tmpDir = os.tmpdir();
+            const tmpFile = path.join(tmpDir, `conduit-before-${Date.now()}-${path.basename(step.diff.filePath)}`);
+            await fs.writeFile(tmpFile, beforeContent, "utf-8");
+
+            const beforeUri = vscode.Uri.file(tmpFile);
+            const afterUri = vscode.Uri.file(absPath);
+            const title = `${path.basename(step.diff.filePath)}: Before ↔ After (Agent Edit)`;
+
+            await vscode.commands.executeCommand("vscode.diff", beforeUri, afterUri, title);
         } catch (err) {
+            vscode.window.showErrorMessage(`AI Summary Error: ${err instanceof Error ? err.message : String(err)}`);
             console.error("Failed to open diff editor for AI Summary:", err);
         }
     }
@@ -199,6 +270,16 @@ export class AiSummaryProvider implements vscode.WebviewViewProvider, vscode.Dis
                 const messages = chatArray.toArray().map((str: string) => {
                     try { return JSON.parse(str) as ChatMessage; } catch { return null; }
                 }).filter((m): m is ChatMessage => m !== null);
+
+                const threadsArray = activeDoc.getArray<string>("chat-threads");
+                const threads = threadsArray.toArray().map((str: string) => {
+                    try { return JSON.parse(str) as ChatThread; } catch { return null; }
+                }).filter((t): t is ChatThread => t !== null);
+
+                const threadMap = new Map<string, ChatThread>();
+                for (const t of threads) {
+                    threadMap.set(t.id, t);
+                }
 
                 totalMessages = messages.length;
 
@@ -242,6 +323,20 @@ export class AiSummaryProvider implements vscode.WebviewViewProvider, vscode.Dis
                                         const currentVal = userLinesMap.get(triggeringUser) ?? 0;
                                         userLinesMap.set(triggeringUser, currentVal + additions);
 
+                                        const thread = threadMap.get(msg.threadId);
+                                        let chatLabel = "Chat";
+                                        if (thread) {
+                                            if (thread.type === "group") {
+                                                chatLabel = "Group Chat";
+                                            } else if (thread.type === "private-fork") {
+                                                chatLabel = `Private Fork${thread.name ? ": " + thread.name : ""}`;
+                                            } else if (thread.type === "public-fork") {
+                                                chatLabel = `Public Fork${thread.name ? ": " + thread.name : ""}`;
+                                            } else if (thread.type === "standalone") {
+                                                chatLabel = "Private Chat";
+                                            }
+                                        }
+
                                         aiEditsList.push({
                                             id: step.id,
                                             messageId: msg.id,
@@ -249,8 +344,10 @@ export class AiSummaryProvider implements vscode.WebviewViewProvider, vscode.Dis
                                             time: msg.createdAt || new Date().toISOString(),
                                             chatPrompt: triggeringPrompt,
                                             filePath: step.diff.filePath,
+                                            chatLabel,
                                             additions,
-                                            deletions
+                                            deletions,
+                                            diff: step.diff
                                         });
                                     }
                                 }
@@ -484,19 +581,111 @@ export class AiSummaryProvider implements vscode.WebviewViewProvider, vscode.Dis
       font-size: 11px;
     }
     .edit-file {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      font-family: inherit;
+      font-size: inherit;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       color: var(--accent);
       max-width: 70%;
+      cursor: pointer;
+      text-align: left;
+    }
+    .edit-file:hover {
+      text-decoration: underline;
+      color: var(--accent-hover, var(--accent));
     }
     .edit-diff-count {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      font-family: inherit;
+      font-size: inherit;
       display: flex;
       gap: 6px;
       font-weight: bold;
+      cursor: pointer;
+    }
+    .edit-diff-count:hover .diff-add,
+    .edit-diff-count:hover .diff-del {
+      opacity: 0.75;
     }
     .diff-add { color: var(--added); }
     .diff-del { color: var(--deleted); }
+
+    .edit-chat-source {
+      font-size: 8.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 4px;
+      color: var(--soft);
+    }
+    
+    .open-file-btn {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: underline;
+      margin-left: 8px;
+      font-size: 10px;
+    }
+    .open-file-btn:hover {
+      color: var(--accent-hover);
+    }
+
+    /* Inline Diff Styles */
+    .diff-view {
+      margin-top: 8px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      background: #111418;
+      text-align: left;
+    }
+    .diff-file-path {
+      padding: 6px 10px;
+      background: rgba(0, 0, 0, 0.2);
+      color: var(--soft);
+      font-size: 10px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .diff-line {
+      padding: 2px 10px;
+      display: flex;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .diff-line.add {
+      background: rgba(80, 211, 124, 0.1);
+      color: var(--added);
+      border-left: 3px solid var(--added);
+    }
+    .diff-line.del {
+      background: rgba(255, 107, 107, 0.1);
+      color: var(--deleted);
+      border-left: 3px solid var(--deleted);
+    }
+    .diff-line.ctx {
+      border-left: 3px solid transparent;
+      color: var(--soft);
+    }
+    .diff-indicator {
+      user-select: none;
+      margin-right: 8px;
+      opacity: 0.5;
+      width: 10px;
+      display: inline-block;
+    }
     
     .empty-state {
       text-align: center;
@@ -624,33 +813,52 @@ export class AiSummaryProvider implements vscode.WebviewViewProvider, vscode.Dis
         // 4. Render Edits Feed
         const feedContainer = document.getElementById('edits-feed-container');
         if (data.aiEditsList && data.aiEditsList.length > 0) {
-          feedContainer.innerHTML = data.aiEditsList.map(item => {
+          // Store list in JS so buttons can reference by index — avoids HTML-escaping JSON in attributes
+          window._editsList = data.aiEditsList;
+          feedContainer.innerHTML = data.aiEditsList.map((item, idx) => {
             const dateStr = formatRelativeTime(item.time);
+            const shortName = escapeHtml(item.filePath.split('/').pop() || item.filePath);
             return \`
-              <div class="edit-item" onclick="openDiff('\${item.id}', '\${item.messageId}')">
+              <div class="edit-item">
                 <div class="edit-header">
                   <span class="edit-user">\${escapeHtml(item.userName)}</span>
-                  <span>\${escapeHtml(dateStr)}</span>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span class="edit-chat-source">\${escapeHtml(item.chatLabel)}</span>
+                    <span>\${escapeHtml(dateStr)}</span>
+                  </div>
                 </div>
                 <div class="edit-prompt">"\${escapeHtml(item.chatPrompt)}"</div>
                 <div class="edit-file-row">
-                  <span class="edit-file" title="\${escapeHtml(item.filePath)}">\${escapeHtml(item.filePath.split('/').pop())}</span>
-                  <div class="edit-diff-count">
+                  <button class="edit-file" title="\${escapeHtml(item.filePath)}" onclick="openFile(event, \${idx})">\${shortName}</button>
+                  <button class="edit-diff-count" title="Open diff in VS Code" onclick="openDiff(event, \${idx})">
                     <span class="diff-add">+\${item.additions}</span>
                     <span class="diff-del">-\${item.deletions}</span>
-                  </div>
+                  </button>
                 </div>
               </div>
             \`;
           }).join('');
         } else {
+          window._editsList = [];
           feedContainer.innerHTML = '<div class="empty-state">No AI edits recorded yet.</div>';
         }
       }
     });
 
-    function openDiff(stepId, messageId) {
-      vscode.postMessage({ type: 'openDiff', stepId, messageId });
+    function openDiff(event, idx) {
+      event.stopPropagation();
+      const item = (window._editsList || [])[idx];
+      if (item && item.diff) {
+        vscode.postMessage({ type: 'openDiff', diff: item.diff });
+      }
+    }
+
+    function openFile(event, idx) {
+      event.stopPropagation();
+      const item = (window._editsList || [])[idx];
+      if (item && item.filePath) {
+        vscode.postMessage({ type: 'openFile', filePath: item.filePath });
+      }
     }
 
     function escapeHtml(str) {
