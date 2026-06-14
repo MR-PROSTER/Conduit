@@ -17,6 +17,7 @@ import type { AgentPauseResult } from '../agent/AgentExecutor.js';
 import type { ImageAttachment } from '@conduit/ai-core';
 import { AgentSafetyLock } from '../agent/AgentSafetyLock.js';
 import { ConduitWebSocketClient } from '../wsClient.js';
+import { TTSController, type VoiceOption } from './TTSController.js';
 
 function getNonce(): string {
   let text = '';
@@ -54,6 +55,11 @@ type WebviewIncoming =
   | { type: 'abortAgent' }
   | { type: 'openDiff'; stepId: string; messageId: string }
   | { type: 'checkVisionSupport' }
+  | { type: 'transcribeAudio'; audioData: string; mimeType: string }
+  | { type: 'speakMessage'; text: string; languageCode?: string; messageId?: string; voiceOption?: 'english' | 'multilingual' }
+  | { type: 'startRecording' }
+  | { type: 'stopRecording' }
+  | { type: 'stopTTS' }
   | { type: 'setApiKey'; provider: string; key: string };
 
 type WebviewOutgoing =
@@ -74,13 +80,21 @@ type WebviewOutgoing =
   | { type: 'contextTokens'; count: number }
   | { type: 'agentPaused'; messageId: string }
   | { type: 'agentResumed'; messageId: string }
-  | { type: 'visionSupport'; supported: boolean }
-  | { type: 'aiStatusChanged'; executingUser: string | null; executingUserName: string | null };
+  | { type: 'transcriptionResult'; text: string }
+  | { type: 'transcriptionError'; error: string }
+  | { type: 'ttsStart';      messageId?: string; totalChunks: number;            voiceOption?: VoiceOption }
+  | { type: 'ttsChunkReady'; messageId?: string; index: number; audioData: string; voiceOption?: VoiceOption }
+  | { type: 'ttsDone';       messageId?: string;                                  voiceOption?: VoiceOption }
+  | { type: 'ttsStopped';    messageId?: string;                                  voiceOption?: VoiceOption }
+  | { type: 'ttsError';      messageId?: string; error: string;                   voiceOption?: VoiceOption }
+  | { type: 'stopAudio';     messageId?: string; voiceOption?: VoiceOption }
+  | { type: 'visionSupport'; supported: boolean };
 
 interface ProviderStatus {
   activeProvider: string;
   activeModel: string;
   hasKey: boolean;
+  hasSarvamKey?: boolean;
   tokenBudget: number;
   providers: {
     name: string;
@@ -128,6 +142,14 @@ export class ChatPanelProvider
   private agentPausedMessageId: string | null = null;
 
   private activeDocListener: Y.Doc | undefined = undefined;
+  private recordingProcess: any = null;
+  private recordingFilePath: string = '';
+  private lastSpokenLanguageCode: string = 'en-IN';
+  private lastInputWasSpoken: boolean = false;
+  private readonly ttsController = new TTSController(
+    () => this.apiKeyStore.getSarvamKey(),
+    (event) => this.post(event as any),
+  );
 
   private aiStatusObserver = (event: Y.YMapEvent<any>) => {
     const activeDoc = this.wsClient.getActiveDoc();
@@ -370,9 +392,15 @@ export class ChatPanelProvider
         await this.sendInit();
         break;
 
-      case 'send':
+      case 'send': {
+        const inputWasSpoken = (msg as any).inputWasSpoken || false;
+        this.lastInputWasSpoken = inputWasSpoken;
+        if (!inputWasSpoken) {
+          this.lastSpokenLanguageCode = 'en-IN';
+        }
         await this.handleSend(msg.content, msg.mode, msg.threadId, msg.images);
         break;
+      }
 
       case 'setMode':
         this.mode = msg.mode;
@@ -380,6 +408,15 @@ export class ChatPanelProvider
         break;
 
       case 'setApiKey': {
+        if (msg.provider === 'sarvam') {
+          if (msg.key && msg.key.trim().length > 0) {
+            await this.apiKeyStore.setSarvamKey(msg.key);
+          } else {
+            await this.apiKeyStore.deleteSarvamKey();
+          }
+          this.post({ type: 'providerStatus', status: await this.buildProviderStatus() });
+          break;
+        }
         const provider = msg.provider as Parameters<ApiKeyStore['setKey']>[0];
         const valid = await this.apiKeyStore.validateKey(provider, msg.key);
         if (valid) {
@@ -388,6 +425,182 @@ export class ChatPanelProvider
         } else {
           this.post({ type: 'error', message: 'API key validation failed. Key not saved.' });
         }
+        break;
+      }
+
+      case 'transcribeAudio': {
+        try {
+          const sarvamKey = await this.apiKeyStore.getSarvamKey();
+          if (!sarvamKey) {
+            this.post({ type: 'transcriptionError', error: 'Sarvam AI API key is missing. Please set it in Settings (⚙).' });
+            break;
+          }
+
+          // Convert base64 data to buffer
+          const base64Content = msg.audioData.split(';base64,').pop() || '';
+          const buffer = Buffer.from(base64Content, 'base64');
+
+          // Build form data
+          const formData = new FormData();
+          const ext = msg.mimeType.includes('ogg') ? 'ogg' : msg.mimeType.includes('wav') ? 'wav' : 'webm';
+          const blob = new Blob([buffer], { type: msg.mimeType });
+          formData.append('file', blob, `audio.${ext}`);
+          formData.append('model', 'saaras:v3');
+          formData.append('mode', 'translate');
+
+          const res = await fetch('https://api.sarvam.ai/speech-to-text', {
+            method: 'POST',
+            headers: {
+              'api-subscription-key': sarvamKey,
+            },
+            body: formData,
+          });
+
+          if (!res.ok) {
+            const errBody = await res.text().catch(() => '');
+            throw new Error(`Sarvam AI API returned status ${res.status}: ${errBody}`);
+          }
+
+          const result = (await res.json()) as { transcript: string; language_code?: string | null };
+          if (result && typeof result.transcript === 'string') {
+            this.lastSpokenLanguageCode = result.language_code || 'en-IN';
+            this.lastInputWasSpoken = true;
+            this.post({ type: 'transcriptionResult', text: result.transcript });
+          } else {
+            throw new Error('Unexpected response format from Sarvam AI Speech-to-Text API.');
+          }
+        } catch (err) {
+          console.error('Transcription failed:', err);
+          this.post({
+            type: 'transcriptionError',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      }
+
+      case 'startRecording': {
+        try {
+          const sarvamKey = await this.apiKeyStore.getSarvamKey();
+          if (!sarvamKey) {
+            this.post({ type: 'transcriptionError', error: 'Sarvam AI API key is missing. Please set it in Settings (⚙).' });
+            break;
+          }
+
+          if (this.recordingProcess) {
+            try {
+              this.recordingProcess.kill();
+            } catch {}
+            this.recordingProcess = null;
+          }
+
+          const os = await import('node:os');
+          const path = await import('node:path');
+          const child_process = await import('node:child_process');
+
+          this.recordingFilePath = path.join(os.tmpdir(), `conduit_voice_${Date.now()}.wav`);
+
+          // Spawn arecord
+          this.recordingProcess = child_process.spawn('arecord', [
+            '-q',
+            '-t', 'wav',
+            '-c', '1',
+            '-r', '16000',
+            '-f', 'S16_LE',
+            this.recordingFilePath
+          ]);
+
+          this.recordingProcess.on('error', (err: any) => {
+            console.error('Failed to start arecord:', err);
+            this.post({ type: 'transcriptionError', error: `Failed to start recording: ${err.message}` });
+            this.recordingProcess = null;
+          });
+        } catch (err) {
+          console.error('Start recording failed:', err);
+          this.post({ type: 'transcriptionError', error: String(err) });
+        }
+        break;
+      }
+
+      case 'stopRecording': {
+        try {
+          if (!this.recordingProcess) {
+            this.post({ type: 'transcriptionError', error: 'No active recording process.' });
+            break;
+          }
+
+          const proc = this.recordingProcess;
+          this.recordingProcess = null;
+
+          proc.kill('SIGINT');
+
+          // Wait brief moment to flush file to disk
+          await new Promise((resolve) => setTimeout(resolve, 500));
+
+          const fs = await import('node:fs/promises');
+          const fileExists = await fs.access(this.recordingFilePath).then(() => true).catch(() => false);
+
+          if (!fileExists) {
+            throw new Error('Recording audio file was not created by arecord.');
+          }
+
+          const buffer = await fs.readFile(this.recordingFilePath);
+          await fs.unlink(this.recordingFilePath).catch(() => {});
+
+          const sarvamKey = await this.apiKeyStore.getSarvamKey();
+          if (!sarvamKey) {
+            throw new Error('Sarvam AI API key is missing.');
+          }
+
+          const formData = new FormData();
+          const blob = new Blob([buffer], { type: 'audio/wav' });
+          formData.append('file', blob, 'audio.wav');
+          formData.append('model', 'saaras:v3');
+          formData.append('mode', 'translate');
+
+          const res = await fetch('https://api.sarvam.ai/speech-to-text', {
+            method: 'POST',
+            headers: {
+              'api-subscription-key': sarvamKey,
+            },
+            body: formData,
+          });
+
+          if (!res.ok) {
+            const errBody = await res.text().catch(() => '');
+            throw new Error(`Sarvam AI API returned status ${res.status}: ${errBody}`);
+          }
+
+          const result = (await res.json()) as { transcript: string; language_code?: string | null };
+          if (result && typeof result.transcript === 'string') {
+            this.lastSpokenLanguageCode = result.language_code || 'en-IN';
+            this.lastInputWasSpoken = true;
+            this.post({ type: 'transcriptionResult', text: result.transcript });
+          } else {
+            throw new Error('Unexpected response format from Sarvam AI Speech-to-Text API.');
+          }
+        } catch (err) {
+          console.error('Stop recording/transcription failed:', err);
+          this.post({
+            type: 'transcriptionError',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      }
+
+      case 'speakMessage': {
+        void this.ttsController.synthesize(
+          msg.text,
+          msg.languageCode,
+          msg.messageId,
+          msg.voiceOption
+        );
+        break;
+      }
+
+      case 'stopTTS': {
+        this.ttsController.stop();
         break;
       }
 
@@ -859,6 +1072,45 @@ export class ChatPanelProvider
     this.addMessage(threadId, placeholder);
     this.post({ type: 'messageAdded', message: placeholder });
 
+    const userQuery = context.conversationHistory.length > 0
+      ? context.conversationHistory[context.conversationHistory.length - 1].content.toLowerCase()
+      : '';
+
+    const langMap: { [key: string]: string } = {
+      'hindi': 'hi-IN',
+      'bengali': 'bn-IN',
+      'tamil': 'ta-IN',
+      'telugu': 'te-IN',
+      'kannada': 'kn-IN',
+      'malayalam': 'ml-IN',
+      'marathi': 'mr-IN',
+      'gujarati': 'gu-IN',
+      'punjabi': 'pa-IN',
+      'odia': 'or-IN',
+      'english': 'en-IN'
+    };
+
+    let detectedLang = this.lastSpokenLanguageCode || 'en-IN';
+    let hasLanguage = false;
+    for (const [langName, langCode] of Object.entries(langMap)) {
+      if (userQuery.includes(langName)) {
+        detectedLang = langCode;
+        hasLanguage = true;
+        break;
+      }
+    }
+
+    const shouldReadOut = 
+      ((userQuery.includes('explain') || 
+        userQuery.includes('read') || 
+        userQuery.includes('speak') || 
+        userQuery.includes('say') ||
+        userQuery.includes('translate')) && hasLanguage) ||
+      this.lastInputWasSpoken;
+
+    // Reset lastInputWasSpoken for the next message
+    this.lastInputWasSpoken = false;
+
     // Save assistant placeholder message to database
     try {
       await this.apiFetch(`/chat/threads/${threadId}/messages`, {
@@ -940,6 +1192,15 @@ export class ChatPanelProvider
       if (activeDoc) {
         const chatArray = activeDoc.getArray<string>('chat-messages');
         chatArray.push([JSON.stringify(finalMsg)]);
+      }
+
+      if (shouldReadOut) {
+        void this.ttsController.synthesize(
+          finalMsg.content,
+          detectedLang,
+          msgId,
+          detectedLang === 'en-IN' ? 'english' : 'multilingual'
+        );
       }
     } catch (err) {
       const errorContent = `Error: ${err instanceof Error ? err.message : 'An error occurred.'}`;
@@ -1356,9 +1617,6 @@ export class ChatPanelProvider
     this.post({ type: 'threadCreated', thread, messages: forkedMessages, threads: this.threads });
   }
 
-  // ----------------------------------------------------------------
-  // Provider helpers
-  // ----------------------------------------------------------------
   private async getActiveProvider(): Promise<ILLMProvider | null> {
     const providerName = this.apiKeyStore.getActiveProvider();
     const hasKey = await this.apiKeyStore.hasKey(providerName);
@@ -1381,6 +1639,7 @@ export class ChatPanelProvider
   private async buildProviderStatus(): Promise<ProviderStatus> {
     const activeProvider = this.apiKeyStore.getActiveProvider();
     const providerNames = ['anthropic', 'openai', 'groq', 'ollama'] as const;
+    const hasSarvamKey = await this.apiKeyStore.hasSarvamKey();
 
     const providers = await Promise.all(
       providerNames.map(async (name) => {
@@ -1415,6 +1674,7 @@ export class ChatPanelProvider
       activeProvider,
       activeModel: activeEntry?.activeModel ?? '',
       hasKey: activeEntry?.hasKey ?? false,
+      hasSarvamKey,
       tokenBudget: this.getTokenBudget(),
       providers,
     };
@@ -1641,6 +1901,7 @@ export class ChatPanelProvider
       `script-src 'nonce-${nonce}'`,
       `connect-src 'none'`,
       `img-src data: vscode-resource:`,
+      `media-src data:`,
     ].join('; ');
 
     const getIconSvg = (name: string, size = 14) => {
@@ -2786,6 +3047,102 @@ export class ChatPanelProvider
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const post = (msg) => vscode.postMessage(msg);
+    let activeAudio = null;
+    let audioChunkQueue = [];
+    let ttsSynthesising = false;
+    const audioPlayer = new Audio();
+
+    function resetSpeakButton(msgId, voiceOption) {
+      if (!msgId || !voiceOption) { return; }
+      const btn = document.getElementById('btn-speak-' + voiceOption + '-' + msgId);
+      if (!btn) { return; }
+      btn.textContent    = voiceOption === 'english' ? '🔊 English' : '🗣️ Multilingual';
+      btn.dataset.state  = 'idle';
+      btn.classList.remove('playing', 'loading');
+    }
+
+    function setButtonLoading(msgId, voiceOption) {
+      if (!msgId || !voiceOption) { return; }
+      const btn = document.getElementById('btn-speak-' + voiceOption + '-' + msgId);
+      if (!btn) { return; }
+      btn.textContent   = '⏛ Loading…';
+      btn.dataset.state = 'loading';
+      btn.classList.add('loading');
+      btn.classList.remove('playing');
+    }
+
+    function setButtonPlaying(msgId, voiceOption) {
+      if (!msgId || !voiceOption) { return; }
+      const btn = document.getElementById('btn-speak-' + voiceOption + '-' + msgId);
+      if (!btn) { return; }
+      btn.textContent   = '⏹️ Stop';
+      btn.dataset.state = 'playing';
+      btn.classList.add('playing');
+      btn.classList.remove('loading');
+    }
+
+    function pauseActiveAudio() {
+      if (activeAudio) {
+        try { activeAudio.pause(); } catch {}
+        try {
+          activeAudio.removeAttribute('src');
+          activeAudio.load();
+        } catch {}
+        activeAudio.onended = null;
+        activeAudio.onerror = null;
+        activeAudio = null;
+      }
+    }
+
+    function stopActiveAudio() {
+      pauseActiveAudio();
+      audioChunkQueue      = [];
+      ttsSynthesising      = false;
+      const msgId          = state.currentlyPlayingMsgId;
+      const voiceOption    = state.currentlyPlayingType;
+      state.currentlyPlayingMsgId  = null;
+      state.currentlyPlayingType   = null;
+      resetSpeakButton(msgId, voiceOption);
+    }
+
+    function playNextChunk() {
+      if (audioChunkQueue.length === 0) {
+        if (!ttsSynthesising) {
+          const msgId       = state.currentlyPlayingMsgId;
+          const voiceOption = state.currentlyPlayingType;
+          state.currentlyPlayingMsgId = null;
+          state.currentlyPlayingType  = null;
+          activeAudio                 = null;
+          resetSpeakButton(msgId, voiceOption);
+        }
+        return;
+      }
+
+      const chunk = audioChunkQueue.shift();
+      try {
+        audioPlayer.src = 'data:audio/mpeg;base64,' + chunk.audioData;
+        activeAudio = audioPlayer;
+        setButtonPlaying(state.currentlyPlayingMsgId, state.currentlyPlayingType);
+        audioPlayer.onerror = () => {
+          console.error('[Conduit TTS] audio element error on chunk', chunk.index);
+          activeAudio = null;
+          playNextChunk();
+        };
+        audioPlayer.onended = () => {
+          activeAudio = null;
+          playNextChunk();
+        };
+        audioPlayer.play().catch(err => {
+          console.error('[Conduit TTS] audio.play() failed:', err);
+          activeAudio = null;
+          playNextChunk();
+        });
+      } catch (err) {
+        console.error('[Conduit TTS] failed to load Audio element source:', err);
+        activeAudio = null;
+        playNextChunk();
+      }
+    }
 
     const state = {
       threads: [],
@@ -3145,7 +3502,10 @@ export class ChatPanelProvider
       if (msg.content === '') {
         const thinkingSpan = document.createElement('span');
         thinkingSpan.className = 'msg-thinking';
-        thinkingSpan.textContent = 'Thinking…';
+        for (let i = 0; i < 3; i++) {
+          const dot = document.createElement('span');
+          thinkingSpan.appendChild(dot);
+        }
         bubble.appendChild(thinkingSpan);
       } else {
         renderMarkdownSafe(msg.content, bubble);
@@ -3279,6 +3639,138 @@ export class ChatPanelProvider
           input.focus();
         });
         forkOverlay.appendChild(btnPublic);
+
+        // Voice options wrapper
+        const voiceWrapper = document.createElement('div');
+        voiceWrapper.style.display = 'inline-flex';
+        voiceWrapper.style.alignItems = 'center';
+        voiceWrapper.style.gap = '4px';
+
+        // 1. Speak English button
+        const btnSpeakEng = document.createElement('button');
+        btnSpeakEng.id = 'btn-speak-english-' + msg.id;
+        btnSpeakEng.className = 'fork-btn';
+        btnSpeakEng.title = 'Speak English';
+        btnSpeakEng.textContent = '🔊 English';
+        btnSpeakEng.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state.currentlyPlayingMsgId === msg.id && state.currentlyPlayingType === 'english') {
+            post({ type: 'stopTTS' });
+            stopActiveAudio();
+            return;
+          }
+          if (state.currentlyPlayingMsgId || ttsSynthesising) {
+            post({ type: 'stopTTS' });
+          }
+          stopActiveAudio();
+          
+          state.currentlyPlayingMsgId = msg.id;
+          state.currentlyPlayingType = 'english';
+          setButtonLoading(msg.id, 'english');
+          
+          // Unlock audio context via user gesture
+          if (typeof audioPlayer !== 'undefined' && audioPlayer) {
+            audioPlayer.play().catch(() => {});
+          }
+
+          post({
+            type: 'speakMessage',
+            text: msg.content,
+            languageCode: 'en-IN',
+            messageId: msg.id,
+            voiceOption: 'english'
+          });
+        });
+        voiceWrapper.appendChild(btnSpeakEng);
+
+        // 2. Multilingual dropdown selection
+        const langSelect = document.createElement('select');
+        langSelect.className = 'voice-lang-select';
+        langSelect.style.background = 'var(--vscode-dropdown-background)';
+        langSelect.style.color = 'var(--vscode-dropdown-foreground)';
+        langSelect.style.border = '1px solid var(--vscode-dropdown-border)';
+        langSelect.style.borderRadius = '2px';
+        langSelect.style.fontSize = '11px';
+        langSelect.style.padding = '1px 3px';
+        langSelect.style.outline = 'none';
+        
+        const langOptions = [
+          { value: 'hi-IN', label: 'Hindi' },
+          { value: 'te-IN', label: 'Telugu' },
+          { value: 'ta-IN', label: 'Tamil' },
+          { value: 'kn-IN', label: 'Kannada' },
+          { value: 'ml-IN', label: 'Malayalam' },
+          { value: 'bn-IN', label: 'Bengali' },
+          { value: 'mr-IN', label: 'Marathi' },
+          { value: 'gu-IN', label: 'Gujarati' },
+          { value: 'pa-IN', label: 'Punjabi' },
+          { value: 'or-IN', label: 'Odia' }
+        ];
+        
+        langOptions.forEach(opt => {
+          const option = document.createElement('option');
+          option.value = opt.value;
+          option.textContent = opt.label;
+          langSelect.appendChild(option);
+        });
+
+        // 3. Speak Multilingual button
+        const btnSpeakMulti = document.createElement('button');
+        btnSpeakMulti.id = 'btn-speak-multilingual-' + msg.id;
+        btnSpeakMulti.className = 'fork-btn';
+        btnSpeakMulti.title = 'Speak Multilingual';
+        btnSpeakMulti.textContent = '🗣️ Multilingual';
+        btnSpeakMulti.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state.currentlyPlayingMsgId === msg.id && state.currentlyPlayingType === 'multilingual') {
+            post({ type: 'stopTTS' });
+            stopActiveAudio();
+            return;
+          }
+          if (state.currentlyPlayingMsgId || ttsSynthesising) {
+            post({ type: 'stopTTS' });
+          }
+          stopActiveAudio();
+          
+          const selectedLang = langSelect.value;
+          state.currentlyPlayingMsgId = msg.id;
+          state.currentlyPlayingType = 'multilingual';
+          setButtonLoading(msg.id, 'multilingual');
+          
+          // Unlock audio context via user gesture
+          if (typeof audioPlayer !== 'undefined' && audioPlayer) {
+            audioPlayer.play().catch(() => {});
+          }
+
+          post({
+            type: 'speakMessage',
+            text: msg.content,
+            languageCode: selectedLang,
+            messageId: msg.id,
+            voiceOption: 'multilingual'
+          });
+        });
+        voiceWrapper.appendChild(btnSpeakMulti);
+        voiceWrapper.appendChild(langSelect);
+
+        // Maintain button text state if recreated during playback
+        if (state.currentlyPlayingMsgId === msg.id) {
+          if (state.currentlyPlayingType === 'english') {
+            if (activeAudio) {
+              setButtonPlaying(msg.id, 'english');
+            } else {
+              setButtonLoading(msg.id, 'english');
+            }
+          } else if (state.currentlyPlayingType === 'multilingual') {
+            if (activeAudio) {
+              setButtonPlaying(msg.id, 'multilingual');
+            } else {
+              setButtonLoading(msg.id, 'multilingual');
+            }
+          }
+        }
+
+        forkOverlay.appendChild(voiceWrapper);
 
         bubble.appendChild(forkOverlay);
       }
@@ -3619,6 +4111,84 @@ export class ChatPanelProvider
 
         drawer.appendChild(row);
       });
+
+      // Add Sarvam AI key row
+      const sarvamRow = document.createElement('div');
+      sarvamRow.className = 'provider-row';
+
+      const sarvamHeader = document.createElement('div');
+      sarvamHeader.className = 'provider-header';
+
+      const sarvamBadge = document.createElement('span');
+      sarvamBadge.className = 'provider-badge';
+      sarvamBadge.style.cursor = 'default';
+      sarvamBadge.innerHTML = (status && status.hasSarvamKey ? '●' : '○') + ' sarvam';
+      sarvamHeader.appendChild(sarvamBadge);
+
+      if (status && status.hasSarvamKey) {
+        const statusText = document.createElement('span');
+        statusText.className = 'provider-status-text';
+        statusText.textContent = '✓ connected';
+        sarvamHeader.appendChild(statusText);
+      }
+      sarvamRow.appendChild(sarvamHeader);
+
+      const sarvamInputGroup = document.createElement('div');
+      sarvamInputGroup.className = 'provider-input-group';
+
+      const sarvamInput = document.createElement('input');
+      sarvamInput.type = 'password';
+      sarvamInput.placeholder = status && status.hasSarvamKey ? '(key saved)' : 'Enter Sarvam API key';
+      sarvamInput.id = 'input-key-sarvam';
+
+      if (state.keys['sarvam']) {
+        sarvamInput.value = state.keys['sarvam'];
+      }
+      sarvamInput.addEventListener('input', (e) => {
+        state.keys['sarvam'] = e.target.value;
+      });
+
+      const btnSaveSarvam = document.createElement('button');
+      btnSaveSarvam.id = 'btn-save-sarvam';
+
+      if (state.saved['sarvam']) {
+        btnSaveSarvam.textContent = '✓';
+        btnSaveSarvam.classList.add('saved');
+      } else if (state.validating['sarvam']) {
+        btnSaveSarvam.textContent = '…';
+      } else {
+        btnSaveSarvam.textContent = 'Save';
+      }
+
+      const triggerSaveSarvam = () => {
+        const val = sarvamInput.value.trim();
+        if (!val) return;
+        state.validating['sarvam'] = true;
+        updateSettingsDrawer();
+        post({ type: 'setApiKey', provider: 'sarvam', key: val });
+
+        setTimeout(() => {
+          state.validating['sarvam'] = false;
+          state.saved['sarvam'] = true;
+          state.keys['sarvam'] = '';
+          updateSettingsDrawer();
+          setTimeout(() => {
+            state.saved['sarvam'] = false;
+            updateSettingsDrawer();
+          }, 2000);
+        }, 1500);
+      };
+
+      btnSaveSarvam.addEventListener('click', triggerSaveSarvam);
+      sarvamInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') triggerSaveSarvam();
+      });
+
+      sarvamInputGroup.appendChild(sarvamInput);
+      sarvamInputGroup.appendChild(btnSaveSarvam);
+      sarvamRow.appendChild(sarvamInputGroup);
+
+      drawer.appendChild(sarvamRow);
     };
 
     const updateChatHistory = () => {
@@ -3777,7 +4347,9 @@ export class ChatPanelProvider
         mode: state.mode,
         threadId: state.activeThreadId,
         images: state.pendingImages.length > 0 ? [...state.pendingImages] : undefined,
+        inputWasSpoken: state.inputWasSpoken
       });
+      state.inputWasSpoken = false;
 
       state.input = '';
       state.pendingImages = [];
@@ -3975,6 +4547,47 @@ export class ChatPanelProvider
         document.getElementById('file-input').click();
       });
 
+      // Microphone: record voice using extension host arecord
+      let isRecording = false;
+
+      const btnMic = document.getElementById('btn-mic');
+      if (btnMic) {
+        btnMic.addEventListener('click', () => {
+          stopActiveAudio();
+          if (!isRecording) {
+            // Start recording on backend
+            isRecording = true;
+            btnMic.classList.add('recording');
+            btnMic.textContent = '⏹️';
+            btnMic.title = 'Stop recording';
+            btnMic.style.borderColor = 'var(--error)';
+            btnMic.style.color = 'var(--error)';
+
+            const textarea = document.getElementById('chat-input');
+            textarea.placeholder = 'Listening… speak now…';
+
+            post({ type: 'startRecording' });
+          } else {
+            // Stop recording on backend
+            isRecording = false;
+            btnMic.classList.remove('recording');
+            btnMic.textContent = '🎤';
+            btnMic.title = 'Record voice';
+            btnMic.style.borderColor = 'var(--border)';
+            btnMic.style.color = 'var(--fg2)';
+
+            const textarea = document.getElementById('chat-input');
+            textarea.placeholder = state.mode === 'agent' ? 'Describe a goal for the agent…' : 'Ask about your codebase…';
+            textarea.value = 'Transcribing audio...';
+            textarea.disabled = true;
+            btnMic.disabled = true;
+            document.getElementById('btn-send').disabled = true;
+
+            post({ type: 'stopRecording' });
+          }
+        });
+      }
+
       document.getElementById('file-input').addEventListener('change', async (e) => {
         const files = e.target.files;
         if (!files || files.length === 0) return;
@@ -4088,6 +4701,7 @@ export class ChatPanelProvider
       const textarea = document.getElementById('chat-input');
       textarea.addEventListener('input', (e) => {
         state.input = e.target.value;
+        state.inputWasSpoken = false;
         textarea.style.height = 'auto';
         textarea.style.height = (textarea.scrollHeight) + 'px';
         updateInputArea();
@@ -4133,6 +4747,7 @@ export class ChatPanelProvider
           break;
 
         case 'threadCreated':
+          stopActiveAudio();
           state.contextTokens = 0;
           if (msg.threads) {
             state.threads = msg.threads;
@@ -4149,6 +4764,7 @@ export class ChatPanelProvider
           break;
 
         case 'threadSelected':
+          stopActiveAudio();
           state.contextTokens = 0;
           if (msg.threads) {
             state.threads = msg.threads;
@@ -4166,6 +4782,107 @@ export class ChatPanelProvider
           state.contextTokens = msg.count;
           updateInputArea();
           break;
+
+        case 'transcriptionResult': {
+          state.inputWasSpoken = true;
+          const textarea = document.getElementById('chat-input');
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const text = textarea.value;
+          const currentVal = text === 'Transcribing audio...' ? '' : text;
+          const newVal = currentVal.substring(0, start) + msg.text + currentVal.substring(end);
+          textarea.value = newVal;
+          textarea.disabled = false;
+          const btnMic = document.getElementById('btn-mic');
+          if (btnMic) btnMic.disabled = false;
+          
+          textarea.style.height = 'auto';
+          textarea.style.height = textarea.scrollHeight + 'px';
+          textarea.focus();
+          textarea.selectionStart = textarea.selectionEnd = start + msg.text.length;
+          updateInputArea();
+          break;
+        }
+
+        case 'transcriptionError': {
+          const textarea = document.getElementById('chat-input');
+          if (textarea.value === 'Transcribing audio...') {
+            textarea.value = '';
+          }
+          textarea.disabled = false;
+          const btnMic = document.getElementById('btn-mic');
+          if (btnMic) btnMic.disabled = false;
+          updateInputArea();
+          alert('Transcription failed: ' + msg.error);
+          break;
+        }
+
+        case 'stopAudio': {
+          stopActiveAudio();
+          break;
+        }
+
+        case 'ttsStart': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
+          stopActiveAudio();
+          ttsSynthesising = true;
+          if (msg.messageId && msg.voiceOption) {
+            state.currentlyPlayingMsgId = msg.messageId;
+            state.currentlyPlayingType  = msg.voiceOption;
+            setButtonLoading(msg.messageId, msg.voiceOption);
+          }
+          break;
+        }
+
+        case 'ttsChunkReady': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
+          audioChunkQueue.push({ index: msg.index, audioData: msg.audioData });
+          if (!activeAudio) {
+            playNextChunk();
+          }
+          break;
+        }
+
+        case 'ttsDone': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
+          ttsSynthesising = false;
+          if (!activeAudio && audioChunkQueue.length === 0) {
+            const msgId      = state.currentlyPlayingMsgId;
+            const opt        = state.currentlyPlayingType;
+            state.currentlyPlayingMsgId = null;
+            state.currentlyPlayingType  = null;
+            resetSpeakButton(msgId, opt);
+          }
+          break;
+        }
+
+        case 'ttsStopped': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
+          stopActiveAudio();
+          break;
+        }
+
+        case 'ttsError': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
+          stopActiveAudio();
+          console.error('[Conduit TTS]', msg.error);
+          break;
+        }
+
+        case 'stopAudio': {
+          stopActiveAudio();
+          break;
+        }
 
         case 'messageAdded':
           state.messages.push(msg.message);

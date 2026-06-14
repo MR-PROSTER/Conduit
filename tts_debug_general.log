@@ -1,0 +1,12 @@
+[TTSController] synthesize called: LANG=hi-IN, MSGID=6d4ace3c-3154-450f-a30c-e9a001b4121f, OPTION=multilingual, LEN=2271
+[TTSController] Text chunked into 3 chunks
+[TTSController] [Worker] Processing chunk 0: length 689
+[TTSController] [Worker] Processing chunk 1: length 701
+[TTSController] [Worker] Translated chunk 1: length 743
+[TTSController] [Worker] Translated chunk 0: length 784
+[TTSController] [Worker] Synthesized chunk 1: audio data size 1176416
+[TTSController] [Worker] Processing chunk 2: length 631
+[TTSController] [Worker] Synthesized chunk 0: audio data size 1193692
+[TTSController] [Worker] Translated chunk 2: length 724
+[TTSController] [Worker] Synthesized chunk 2: audio data size 1054372
+[TTSController] Synthesis finished successfully!

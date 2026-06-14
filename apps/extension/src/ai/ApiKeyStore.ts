@@ -32,6 +32,23 @@ export class ApiKeyStore {
     return key !== undefined && key.trim().length > 0;
   }
 
+  public async getSarvamKey(): Promise<string | undefined> {
+    return this.context.secrets.get(`${KEY_PREFIX}sarvam`);
+  }
+
+  public async setSarvamKey(key: string): Promise<void> {
+    await this.context.secrets.store(`${KEY_PREFIX}sarvam`, key);
+  }
+
+  public async deleteSarvamKey(): Promise<void> {
+    await this.context.secrets.delete(`${KEY_PREFIX}sarvam`);
+  }
+
+  public async hasSarvamKey(): Promise<boolean> {
+    const key = await this.getSarvamKey();
+    return key !== undefined && key.trim().length > 0;
+  }
+
   public getOllamaUrl(): string {
     return (
       this.context.globalState.get<string>(OLLAMA_URL_KEY) ??
