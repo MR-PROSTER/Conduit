@@ -16,6 +16,16 @@ Conduit is a premium real-time collaborative development extension for VS Code t
 
 ---
 
+## 📸 UI Showcase
+
+<p align="center">
+  <img src="apps/extension/media/collaborators_disconnected.jpg" width="32%" alt="Collaborators Disconnected" />
+  <img src="apps/extension/media/collaborators_connected.jpg" width="32%" alt="Collaborators Connected" />
+  <img src="apps/extension/media/ai_summary.jpg" width="32%" alt="AI Summary Dashboard" />
+</p>
+
+---
+
 ## 🏗️ Monorepo Architecture
 
 Conduit is managed as a monorepo using `pnpm` workspaces:
