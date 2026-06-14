@@ -2168,6 +2168,10 @@ export class ChatPanelProvider
     function pauseActiveAudio() {
       if (activeAudio) {
         try { activeAudio.pause(); } catch {}
+        try {
+          activeAudio.removeAttribute('src');
+          activeAudio.load();
+        } catch {}
         activeAudio.onended = null;
         activeAudio.onerror = null;
         activeAudio = null;
@@ -2716,6 +2720,9 @@ export class ChatPanelProvider
             stopActiveAudio();
             return;
           }
+          if (state.currentlyPlayingMsgId || ttsSynthesising) {
+            post({ type: 'stopTTS' });
+          }
           stopActiveAudio();
           
           state.currentlyPlayingMsgId = msg.id;
@@ -2780,6 +2787,9 @@ export class ChatPanelProvider
             post({ type: 'stopTTS' });
             stopActiveAudio();
             return;
+          }
+          if (state.currentlyPlayingMsgId || ttsSynthesising) {
+            post({ type: 'stopTTS' });
           }
           stopActiveAudio();
           
@@ -3880,6 +3890,9 @@ export class ChatPanelProvider
         }
 
         case 'ttsStart': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
           stopActiveAudio();
           ttsSynthesising = true;
           if (msg.messageId && msg.voiceOption) {
@@ -3891,6 +3904,9 @@ export class ChatPanelProvider
         }
 
         case 'ttsChunkReady': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
           audioChunkQueue.push({ index: msg.index, audioData: msg.audioData });
           if (!activeAudio) {
             playNextChunk();
@@ -3899,6 +3915,9 @@ export class ChatPanelProvider
         }
 
         case 'ttsDone': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
           ttsSynthesising = false;
           if (!activeAudio && audioChunkQueue.length === 0) {
             const msgId      = state.currentlyPlayingMsgId;
@@ -3911,11 +3930,17 @@ export class ChatPanelProvider
         }
 
         case 'ttsStopped': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
           stopActiveAudio();
           break;
         }
 
         case 'ttsError': {
+          if (msg.messageId !== state.currentlyPlayingMsgId || msg.voiceOption !== state.currentlyPlayingType) {
+            break;
+          }
           stopActiveAudio();
           console.error('[Conduit TTS]', msg.error);
           break;
