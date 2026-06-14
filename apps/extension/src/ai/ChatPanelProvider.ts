@@ -88,7 +88,8 @@ type WebviewOutgoing =
   | { type: 'ttsStopped';    messageId?: string;                                  voiceOption?: VoiceOption }
   | { type: 'ttsError';      messageId?: string; error: string;                   voiceOption?: VoiceOption }
   | { type: 'stopAudio';     messageId?: string; voiceOption?: VoiceOption }
-  | { type: 'visionSupport'; supported: boolean };
+  | { type: 'visionSupport'; supported: boolean }
+  | { type: 'aiStatusChanged'; executingUser: string | null; executingUserName: string | null };
 
 interface ProviderStatus {
   activeProvider: string;
@@ -1930,7 +1931,10 @@ export class ChatPanelProvider
         users: `<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>`,
         gitBranch: `<line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path>`,
         lock: `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>`,
-        messageSquare: `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>`
+        messageSquare: `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>`,
+        mic: `<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line>`,
+        volume2: `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>`,
+        loader: `<path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>`
       };
       return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-${name}">${paths[name] || ''}</svg>`;
     };
@@ -1959,12 +1963,12 @@ export class ChatPanelProvider
       --surface: var(--vscode-editor-background, #151515);
       --surface2: var(--vscode-sideBarSectionHeader-background, #202022);
       --border: var(--vscode-panel-border, #333336);
-      --border-focus: #f3c299;
+      --border-focus: var(--vscode-focusBorder, #f3c299);
       --fg: var(--vscode-foreground, #f4f4f5);
       --fg2: var(--vscode-descriptionForeground, #a1a1aa);
-      --accent: #f3c299;
-      --accent-fg: #000000;
-      --focus: #f3c299;
+      --accent: var(--vscode-button-background, #f3c299);
+      --accent-fg: var(--vscode-button-foreground, #000000);
+      --focus: var(--vscode-focusBorder, #f3c299);
       --error: var(--vscode-errorForeground, #f48771);
       --green: var(--vscode-terminal-ansiGreen, #89d185);
       --font: 'Arima', 'Inter', var(--vscode-font-family, sans-serif);
@@ -2352,6 +2356,10 @@ export class ChatPanelProvider
       right: 12px;
       gap: 4px;
       z-index: 10;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: calc(100% - 24px);
     }
     .msg-bubble-container.assistant:hover .fork-overlay {
       display: flex;
@@ -2384,6 +2392,41 @@ export class ChatPanelProvider
       background: var(--error);
       color: #fff;
       border-color: var(--error);
+    }
+    .voice-lang-select {
+      background: var(--surface2);
+      color: var(--fg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 8px;
+      outline: none;
+      cursor: pointer;
+      font-family: var(--font);
+      transition: all 0.15s;
+    }
+    .voice-lang-select:hover {
+      border-color: var(--focus);
+      color: var(--fg);
+      background: var(--bg);
+    }
+    #btn-mic.recording {
+      border-color: var(--error) !important;
+      color: var(--error) !important;
+      animation: pulse-border 1.5s infinite alternate;
+    }
+    @keyframes pulse-border {
+      from { box-shadow: 0 0 2px rgba(244, 135, 113, 0.2); }
+      to { box-shadow: 0 0 8px rgba(244, 135, 113, 0.6); }
+    }
+    .animate-spin {
+      animation: spin 1.2s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
 
     /* Context Badge Container */
@@ -3038,6 +3081,7 @@ export class ChatPanelProvider
         <textarea id="chat-input" rows="2" placeholder="Ask about your codebase…"></textarea>
         <input type="file" id="file-input" accept="*/*" multiple style="display:none">
         <button id="btn-attach" class="btn-attach" title="Attach file">${getIconSvg('paperclip', 16)}</button>
+        <button id="btn-mic" class="btn-attach" title="Record voice">${getIconSvg('mic', 16)}</button>
         <button id="btn-pause" class="btn-pause hidden" title="Pause agent">${getIconSvg('pause', 16)}</button>
         <button id="btn-send" class="btn-send" disabled>${getIconSvg('send', 16)}</button>
       </div>
@@ -3056,7 +3100,7 @@ export class ChatPanelProvider
       if (!msgId || !voiceOption) { return; }
       const btn = document.getElementById('btn-speak-' + voiceOption + '-' + msgId);
       if (!btn) { return; }
-      btn.textContent    = voiceOption === 'english' ? '🔊 English' : '🗣️ Multilingual';
+      btn.innerHTML      = voiceOption === 'english' ? getIcon('volume2', 12) + ' English' : getIcon('messageSquare', 12) + ' Multilingual';
       btn.dataset.state  = 'idle';
       btn.classList.remove('playing', 'loading');
     }
@@ -3065,7 +3109,7 @@ export class ChatPanelProvider
       if (!msgId || !voiceOption) { return; }
       const btn = document.getElementById('btn-speak-' + voiceOption + '-' + msgId);
       if (!btn) { return; }
-      btn.textContent   = '⏛ Loading…';
+      btn.innerHTML     = getIcon('loader', 12, 'animate-spin') + ' Loading…';
       btn.dataset.state = 'loading';
       btn.classList.add('loading');
       btn.classList.remove('playing');
@@ -3075,7 +3119,7 @@ export class ChatPanelProvider
       if (!msgId || !voiceOption) { return; }
       const btn = document.getElementById('btn-speak-' + voiceOption + '-' + msgId);
       if (!btn) { return; }
-      btn.textContent   = '⏹️ Stop';
+      btn.innerHTML     = getIcon('stop', 12) + ' Stop';
       btn.dataset.state = 'playing';
       btn.classList.add('playing');
       btn.classList.remove('loading');
@@ -3196,11 +3240,14 @@ export class ChatPanelProvider
       users: \`<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>\`,
       gitBranch: \`<line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path>\`,
       lock: \`<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>\`,
-      messageSquare: \`<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>\`
+      messageSquare: \`<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>\`,
+      mic: \`<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line>\`,
+      volume2: \`<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>\`,
+      loader: \`<path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>\`
     };
 
-    const getIcon = (name, size = 14) => {
-      return \`<svg xmlns="http://www.w3.org/2000/svg" width="\${size}" height="\${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-\${name}">\${icons[name] || ''}</svg>\`;
+    const getIcon = (name, size = 14, extraClass = '') => {
+      return \`<svg xmlns="http://www.w3.org/2000/svg" width="\${size}" height="\${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-\${name} \${extraClass}">\${icons[name] || ''}</svg>\`;
     };
 
     // ── Helpers ──
@@ -3651,7 +3698,7 @@ export class ChatPanelProvider
         btnSpeakEng.id = 'btn-speak-english-' + msg.id;
         btnSpeakEng.className = 'fork-btn';
         btnSpeakEng.title = 'Speak English';
-        btnSpeakEng.textContent = '🔊 English';
+        btnSpeakEng.innerHTML = getIcon('volume2', 12) + ' English';
         btnSpeakEng.addEventListener('click', (e) => {
           e.stopPropagation();
           if (state.currentlyPlayingMsgId === msg.id && state.currentlyPlayingType === 'english') {
@@ -3686,13 +3733,6 @@ export class ChatPanelProvider
         // 2. Multilingual dropdown selection
         const langSelect = document.createElement('select');
         langSelect.className = 'voice-lang-select';
-        langSelect.style.background = 'var(--vscode-dropdown-background)';
-        langSelect.style.color = 'var(--vscode-dropdown-foreground)';
-        langSelect.style.border = '1px solid var(--vscode-dropdown-border)';
-        langSelect.style.borderRadius = '2px';
-        langSelect.style.fontSize = '11px';
-        langSelect.style.padding = '1px 3px';
-        langSelect.style.outline = 'none';
         
         const langOptions = [
           { value: 'hi-IN', label: 'Hindi' },
@@ -3719,7 +3759,7 @@ export class ChatPanelProvider
         btnSpeakMulti.id = 'btn-speak-multilingual-' + msg.id;
         btnSpeakMulti.className = 'fork-btn';
         btnSpeakMulti.title = 'Speak Multilingual';
-        btnSpeakMulti.textContent = '🗣️ Multilingual';
+        btnSpeakMulti.innerHTML = getIcon('messageSquare', 12) + ' Multilingual';
         btnSpeakMulti.addEventListener('click', (e) => {
           e.stopPropagation();
           if (state.currentlyPlayingMsgId === msg.id && state.currentlyPlayingType === 'multilingual') {
@@ -4558,7 +4598,7 @@ export class ChatPanelProvider
             // Start recording on backend
             isRecording = true;
             btnMic.classList.add('recording');
-            btnMic.textContent = '⏹️';
+            btnMic.innerHTML = getIcon('stop', 16);
             btnMic.title = 'Stop recording';
             btnMic.style.borderColor = 'var(--error)';
             btnMic.style.color = 'var(--error)';
@@ -4571,10 +4611,10 @@ export class ChatPanelProvider
             // Stop recording on backend
             isRecording = false;
             btnMic.classList.remove('recording');
-            btnMic.textContent = '🎤';
-            btnMic.title = 'Record voice';
-            btnMic.style.borderColor = 'var(--border)';
-            btnMic.style.color = 'var(--fg2)';
+            btnMic.innerHTML = getIcon('loader', 16, 'animate-spin');
+            btnMic.title = 'Transcribing voice...';
+            btnMic.style.borderColor = 'var(--accent)';
+            btnMic.style.color = 'var(--accent)';
 
             const textarea = document.getElementById('chat-input');
             textarea.placeholder = state.mode === 'agent' ? 'Describe a goal for the agent…' : 'Ask about your codebase…';
@@ -4794,7 +4834,12 @@ export class ChatPanelProvider
           textarea.value = newVal;
           textarea.disabled = false;
           const btnMic = document.getElementById('btn-mic');
-          if (btnMic) btnMic.disabled = false;
+          if (btnMic) {
+            btnMic.disabled = false;
+            btnMic.innerHTML = getIcon('mic', 16);
+            btnMic.style.borderColor = '';
+            btnMic.style.color = '';
+          }
           
           textarea.style.height = 'auto';
           textarea.style.height = textarea.scrollHeight + 'px';
@@ -4811,7 +4856,12 @@ export class ChatPanelProvider
           }
           textarea.disabled = false;
           const btnMic = document.getElementById('btn-mic');
-          if (btnMic) btnMic.disabled = false;
+          if (btnMic) {
+            btnMic.disabled = false;
+            btnMic.innerHTML = getIcon('mic', 16);
+            btnMic.style.borderColor = '';
+            btnMic.style.color = '';
+          }
           updateInputArea();
           alert('Transcription failed: ' + msg.error);
           break;

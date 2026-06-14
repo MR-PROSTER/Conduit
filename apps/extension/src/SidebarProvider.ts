@@ -280,7 +280,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             return;
         }
         const nextState = this.buildState(snapshot, authState);
-        
+
         // 1. Instantly post update with in-memory cached drafts and members to eliminate network latency
         nextState.drafts = this.cachedDrafts;
         nextState.members = this.cachedMembers[nextState.snapshot.roomId || ""] || [];
@@ -294,7 +294,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             try {
                 const roomId = nextState.snapshot.roomId;
                 const token = authState.accessToken;
-                
+
                 const promises: Promise<any>[] = [this.loadDrafts(nextState.authed)];
                 if (roomId && token) {
                     promises.push(this.authService.listMembers(roomId, token).catch(() => []));
@@ -413,13 +413,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
                 ['Active file', activeFile, 'value code'],
                 ['Room ID', snapshot.roomId || 'No room', 'value code'],
                 ...(inRoom ? [
-                  ['Room name', snapshot.room?.name || 'No room', 'value'],
-                  ['Room URL', roomRepoUrl, 'value code'],
+                    ['Room name', snapshot.room?.name || 'No room', 'value'],
+                    ['Room URL', roomRepoUrl, 'value code'],
                 ] : []),
                 ['Session', sessionId, 'value code'],
                 ['Participants', String(collaborators.length), 'value'],
                 ['Account', accountName, 'value'],
-              ]
+            ]
                 .map((item) => `<div class="detail"><div class="label">${escapeHtml(item[0])}</div><div class="${item[2]}">${escapeHtml(item[1])}</div></div>`)
                 .join('')
             : '<div class="empty" style="grid-column: 1 / -1;">Sign in to create or join a room, manage drafts, and see collaborators.</div>';
@@ -456,7 +456,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
         const members = state.members || [];
         const mergedCollaborators: any[] = [];
         const activeMap = new Map();
-        
+
         collaborators.forEach((c: any) => {
             activeMap.set(c.userId, c);
         });
@@ -512,7 +512,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
                         const name = col.name || col.userId || 'Anonymous';
                         const role = col.role;
                         const isGithubUser = name && name !== 'Conduit User' && name !== 'Anonymous' && !name.includes(' ') && !name.includes('@');
-                        
+
                         const avatarHtml = isGithubUser
                             ? `<div class="avatar" style="background:${escapeHtml(col.color || '#666')};position:relative;display:grid;">
                                    ${escapeHtml(initials(name))}
@@ -522,7 +522,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
 
                         const isOwner = role.toLowerCase() === 'owner' || col.userId === roomOwnerId;
                         const roleBadgeHtml = isOwner
-                            ? `<span class="owner-crown" title="Room Owner" style="font-size: 16px; margin-right: 4px; display: inline-block; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.5));">👑</span>`
+                            ? `<span class="owner-crown" title="Room Owner" style="display: inline-flex; align-items: center; justify-content: center; margin-right: 4px; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.4)); color: #ffd700;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-crown"><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></svg></span>`
                             : `<span class="badge ${role.toLowerCase()}">${escapeHtml(role)}</span>`;
 
                         const banButtonHtml = isCurrentUserOwner && col.userId !== roomOwnerId
@@ -592,8 +592,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       --panel-2: color-mix(in srgb, var(--vscode-editorWidget-background) 68%, #0f1319 32%);
       --border: color-mix(in srgb, var(--vscode-editorWidget-border) 82%, transparent);
       --soft: var(--vscode-descriptionForeground);
-      --accent: color-mix(in srgb, var(--vscode-button-background) 74%, #efbf8d 26%);
-      --accent-hover: color-mix(in srgb, var(--vscode-button-hoverBackground) 72%, #f1c999 28%);
+      --accent: var(--vscode-button-background);
+      --accent-hover: var(--vscode-button-hoverBackground);
       --good: #50d37c;
       --warn: #ffbf4d;
       --bad: #ff6b6b;
@@ -612,9 +612,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
     }
 
     .shell {
-      padding: 10px;
+      padding: 5px;
       display: grid;
-      gap: 10px;
+      gap: 5px;
     }
 
     .panel {
@@ -1149,7 +1149,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
                   const name = collaborator.name || collaborator.userId || 'Anonymous';
                   const role = collaborator.role;
                   const isGithubUser = name && name !== 'Conduit User' && name !== 'Anonymous' && !name.includes(' ') && !name.includes('@');
-                  
+
                   let avatarHtml = '';
                   if (isGithubUser) {
                     avatarHtml = '<div class="avatar" style="background:' + escapeHtml(collaborator.color || '#666') + '; position: relative; display: grid;">' +
@@ -1162,7 +1162,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
 
                   const isOwner = role.toLowerCase() === 'owner' || collaborator.userId === roomOwnerId;
                   const roleBadgeHtml = isOwner
-                      ? '<span class="owner-crown" title="Room Owner" style="font-size: 16px; margin-right: 4px; display: inline-block; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.5));">👑</span>'
+                      ? '<span class="owner-crown" title="Room Owner" style="display: inline-flex; align-items: center; justify-content: center; margin-right: 4px; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.4)); color: #ffd700;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-crown"><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></svg></span>'
                       : '<span class="badge ' + role.toLowerCase() + '">' + escapeHtml(role) + '</span>';
 
                   const banButtonHtml = isCurrentUserOwner && collaborator.userId !== roomOwnerId
