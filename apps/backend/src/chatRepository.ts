@@ -250,6 +250,7 @@ export class ChatRepository {
     const messagesData = hasMore ? data.slice(0, limit) : data || [];
 
     const messages = messagesData.map((row) => this.mapMessage(row));
+    messages.reverse();
 
     let nextCursor: string | undefined = undefined;
     if (hasMore && messagesData.length > 0) {
