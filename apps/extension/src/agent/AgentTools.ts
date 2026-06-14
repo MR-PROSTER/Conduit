@@ -149,7 +149,8 @@ export class AgentTools {
       const absPath = this.resolve(filePath);
       await fs.mkdir(path.dirname(absPath), { recursive: true });
       await fs.writeFile(absPath, content, 'utf-8');
-      return { output: `Created ${filePath}`, error: undefined, fileDiff: undefined };
+      const diff = this.buildDiff(filePath, '', content);
+      return { output: `Created ${filePath}`, error: undefined, fileDiff: diff };
     } catch (err) {
       return {
         output: '',
@@ -176,8 +177,11 @@ export class AgentTools {
       }
     }
     try {
-      await fs.unlink(this.resolve(filePath));
-      return { output: `Deleted ${filePath}`, error: undefined, fileDiff: undefined };
+      const absPath = this.resolve(filePath);
+      const current = await fs.readFile(absPath, 'utf-8').catch(() => '');
+      await fs.unlink(absPath);
+      const diff = this.buildDiff(filePath, current, '');
+      return { output: `Deleted ${filePath}`, error: undefined, fileDiff: diff };
     } catch (err) {
       return {
         output: '',
