@@ -264,7 +264,7 @@ export function createBackendServer(config?: BackendServerConfig): BackendServer
         // Initialize chatRepository
         await chatRepository.initialize();
 
-        // Start auto-save timer (every 5 min, saves all active Yjs docs as drafts)
+        // Start auto-save timer (every 5 seconds, saves all active Yjs docs as drafts)
         autoSaveTimer = setInterval(
             async () => {
                 try {
@@ -320,7 +320,7 @@ export function createBackendServer(config?: BackendServerConfig): BackendServer
                     console.error("Auto-save timer error:", err);
                 }
             },
-            5 * 60 * 1000,
+            5 * 1000,
         );
 
         // Start GC timer (every 24 hours, cleanupExpiredDrafts(30))

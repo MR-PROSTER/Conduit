@@ -404,5 +404,197 @@ export function createRoomRouter(permissions: RoomPermissionService): Router {
     }
   });
 
+  // GET /rooms/:id/members → { members: [...] }
+  router.get("/rooms/:id/members", async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const roomId = req.params.id as string;
+
+      // Verify active room access
+      const access = await permissions.assertActiveRoomAccess(user.id, roomId);
+
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error("Supabase client not initialized");
+      }
+
+      // 1. Fetch the room owner user profile
+      const { data: ownerUser, error: ownerError } = await supabase
+        .from("users")
+        .select("id, name, email")
+        .eq("id", access.room.ownerId)
+        .maybeSingle();
+
+      if (ownerError) throw ownerError;
+
+      // 2. Fetch all active members in room_members, joined with user profile
+      const { data: membersData, error: membersError } = await supabase
+        .from("room_members")
+        .select(`
+          user_id,
+          role,
+          status,
+          users (
+            id,
+            name,
+            email
+          )
+        `)
+        .eq("room_id", roomId)
+        .eq("status", "active");
+
+      if (membersError) throw membersError;
+
+      // 3. Construct list of members
+      const membersList: any[] = [];
+
+      // Always add owner first, or ensure they are present
+      if (ownerUser) {
+        membersList.push({
+          userId: ownerUser.id,
+          name: ownerUser.name || "Anonymous",
+          email: ownerUser.email,
+          role: "Owner",
+          status: "active"
+        });
+      }
+
+      // Add active room members, avoiding duplicates if the owner is also in room_members
+      if (membersData) {
+        for (const m of membersData) {
+          const u = (m as any).users;
+          if (!u) continue;
+          if (u.id === access.room.ownerId) {
+            // Already added owner
+            continue;
+          }
+          membersList.push({
+            userId: u.id,
+            name: u.name || "Anonymous",
+            email: u.email,
+            role: m.role || "member",
+            status: "active"
+          });
+        }
+      }
+
+      res.json({ members: membersList });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  // POST /rooms/:id/members/:userId/promote → { member }
+  router.post("/rooms/:id/members/:userId/promote", async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const roomId = req.params.id as string;
+      const targetUserId = req.params.userId as string;
+
+      const access = await permissions.assertActiveRoomAccess(user.id, roomId);
+      if (!access.isOwner) {
+        return res.status(403).json({ error: "Only the room owner can modify member roles" });
+      }
+
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error("Supabase client not initialized");
+      }
+
+      const { data: memberData, error } = await supabase
+        .from("room_members")
+        .update({ role: "admin" })
+        .eq("room_id", roomId)
+        .eq("user_id", targetUserId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ member: memberData });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  // POST /rooms/:id/members/:userId/downgrade → { member }
+  router.post("/rooms/:id/members/:userId/downgrade", async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const roomId = req.params.id as string;
+      const targetUserId = req.params.userId as string;
+
+      const access = await permissions.assertActiveRoomAccess(user.id, roomId);
+      if (!access.isOwner) {
+        return res.status(403).json({ error: "Only the room owner can modify member roles" });
+      }
+
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error("Supabase client not initialized");
+      }
+
+      const { data: memberData, error } = await supabase
+        .from("room_members")
+        .update({ role: "member" })
+        .eq("room_id", roomId)
+        .eq("user_id", targetUserId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ member: memberData });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  // POST /rooms/:id/members/:userId/ban → { member }
+  router.post("/rooms/:id/members/:userId/ban", async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const roomId = req.params.id as string;
+      const targetUserId = req.params.userId as string;
+      const { reason } = req.body;
+
+      // Assert current user is owner of the room
+      const access = await permissions.assertActiveRoomAccess(user.id, roomId);
+      if (!access.isOwner) {
+        return res.status(403).json({ error: "Only the room owner can ban members" });
+      }
+
+      if (user.id === targetUserId) {
+        return res.status(400).json({ error: "You cannot ban yourself from the room" });
+      }
+
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error("Supabase client not initialized");
+      }
+
+      // Update status to 'banned' in room_members (inserting a record if not existing or updating)
+      const { data: memberData, error } = await supabase
+        .from("room_members")
+        .upsert(
+          {
+            room_id: roomId,
+            user_id: targetUserId,
+            status: "banned",
+            banned_at: new Date().toISOString(),
+            banned_by: user.id,
+            ban_reason: reason || null,
+          },
+          { onConflict: "room_id,user_id" }
+        )
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      res.json({ member: memberData });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
   return router;
 }

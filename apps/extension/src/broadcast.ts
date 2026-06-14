@@ -25,6 +25,7 @@ export interface CollaboratorPresence {
   readonly name: string;
   readonly color: string;
   readonly status: "online" | "offline";
+  readonly role?: string;
 }
 
 export type CollaborationEvent =

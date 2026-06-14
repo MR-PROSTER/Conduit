@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { Session } from "@conduit/shared-types";
+import { GitService } from "@conduit/git-core";
 
 import type { ExtensionServices } from "../extension.js";
 import { createSessionId } from "../sessionKeys.js";
@@ -37,6 +38,68 @@ export const createSessionCommand = (
         }));
       if (!branch) {
         return;
+      }
+
+      // Check for uncommitted changes
+      const repoPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (repoPath) {
+        const git = new GitService({ repoPath });
+        const status = await git.getStatus();
+        if (!status.clean) {
+          const fileCount =
+            status.staged.length +
+            status.modified.length +
+            status.untracked.length +
+            status.deleted.length;
+
+          const action = await vscode.window.showWarningMessage(
+            `Your working tree has ${fileCount} uncommitted change${fileCount === 1 ? "" : "s"}. You must commit or stash them before creating the session.`,
+            { modal: true },
+            "Commit Changes",
+            "Stash Changes",
+            "Cancel Session Creation"
+          );
+
+          if (action === "Commit Changes") {
+            const message = await vscode.window.showInputBox({
+              title: "Commit Before Creating Session",
+              prompt: "Enter a commit message for your local changes",
+              placeHolder: "wip: save local changes before collab session",
+              validateInput: (v) =>
+                v.trim().length === 0 ? "Commit message cannot be empty" : undefined
+            });
+            if (!message) {
+              return;
+            }
+
+            await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: "Committing local changes…",
+                cancellable: false
+              },
+              async () => {
+                await git.commit(message.trim(), { all: true });
+              }
+            );
+            void vscode.window.showInformationMessage("Local changes committed.");
+          } else if (action === "Stash Changes") {
+            await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: "Stashing local changes…",
+                cancellable: false
+              },
+              async () => {
+                await git.stash("[conduit] stash before creating session");
+              }
+            );
+            void vscode.window.showInformationMessage("Local changes stashed.");
+          } else {
+            // Cancel Session Creation
+            return;
+          }
+        }
       }
 
       const sessionId = createSessionId();

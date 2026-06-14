@@ -3,7 +3,7 @@ import type { Draft } from "@conduit/shared-types";
 import type { BroadcastHub, CollaborationSnapshot } from "./broadcast.js";
 import type { BranchSessionRegistry } from "./BranchSessionRegistry.js";
 import type { ConduitWebSocketClient } from "./wsClient.js";
-import type { AuthService } from "./AuthService.js";
+import type { AuthService, ConduitUser, AuthState } from "./AuthService.js";
 import { getButtons } from "./state/ButtonConfig.js";
 import { getStateManager } from "./state/ExtensionStateManager.js";
 import type { ConduitState } from "./state/ExtensionStateManager.js";
@@ -34,6 +34,7 @@ interface SidebarState {
     drafts: readonly Draft[];
     conduitState: ConduitState;
     buttons: ReturnType<typeof getButtons>;
+    members?: readonly any[];
 }
 
 interface SidebarMessage {
@@ -50,8 +51,12 @@ interface SidebarMessage {
     | "leaveSession"
     | "switchBranch"
     | "refresh"
-    | "restoreDraft";
+    | "restoreDraft"
+    | "banUser"
+    | "ready";
     draftId?: string;
+    userId?: string;
+    userName?: string;
 }
 
 export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -60,8 +65,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
     private readonly disposables: vscode.Disposable[] = [];
     private view: vscode.WebviewView | undefined;
     private cachedDrafts: readonly Draft[] = [];
+    private cachedMembers: Record<string, readonly any[]> = {};
     private lastDraftsFetchTime = 0;
     private draftsPromise: Promise<readonly Draft[]> | null = null;
+    private refreshCounter = 0;
 
     constructor(
         private readonly broadcastHub: BroadcastHub,
@@ -112,7 +119,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             })
         );
 
-        void this.refreshView(initialState.snapshot);
+        void this.refreshView();
     }
 
     dispose(): void {
@@ -157,32 +164,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             case "refresh":
                 await this.refreshView();
                 return;
+            case "ready":
+                await this.refreshView();
+                return;
             case "restoreDraft":
                 await vscode.commands.executeCommand("conduit.restoreDrafts");
+                break;
+            case "banUser":
+                if (message.userId) {
+                    await this.banUser(message.userId, message.userName);
+                }
                 break;
         }
 
         await this.refreshView();
     }
 
-    private buildPlaceholderState(snapshot = this.broadcastHub.getSnapshot()): SidebarState {
-        const activeEditor = vscode.window.activeTextEditor;
-        const conduitState = getStateManager().get().state;
-        return {
-            authed: false,
-            user: null,
-            localUserId: this.localUserId,
-            localUserName: this.localUserName,
-            activeFile: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri, false) : null,
-            snapshot,
-            knownSession: null,
-            drafts: [],
-            conduitState,
-            buttons: getButtons(conduitState),
-        };
-    }
-
-    private buildState(snapshot = this.broadcastHub.getSnapshot(), authState: any): SidebarState {
+    private buildSidebarState(snapshot = this.broadcastHub.getSnapshot(), authParam: { user: ConduitUser | null | undefined, hasToken: boolean }): SidebarState {
         const activeEditor = vscode.window.activeTextEditor;
         const extensionState = getStateManager().get();
         const conduitState = extensionState.state;
@@ -212,10 +210,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             session: effectiveSession,
             roomId: effectiveRoom?.id ?? snapshot.roomId ?? effectiveSession?.roomId
         };
-        const user = authState.user?.id
+        const user = authParam.user?.id
             ? {
-                id: String(authState.user.id),
-                name: String(authState.user.name || this.localUserName),
+                id: String(authParam.user.id),
+                name: String(authParam.user.username || this.localUserName),
             }
             : null;
         const record = effectiveSnapshot.session?.branch
@@ -234,7 +232,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
         } : null;
 
         return {
-            authed: Boolean(authState.accessToken && authState.user),
+            authed: authParam.hasToken && Boolean(authParam.user),
             user,
             localUserId: this.localUserId,
             localUserName: this.localUserName,
@@ -244,17 +242,84 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             drafts: [],
             conduitState,
             buttons: getButtons(conduitState),
+            members: [],
         };
     }
 
+    private buildPlaceholderState(snapshot = this.broadcastHub.getSnapshot()): SidebarState {
+        const extensionState = getStateManager().get();
+        const cachedUser = this.authService.getCachedUser();
+        const user = extensionState.user ? {
+            id: extensionState.user.id,
+            email: extensionState.user.email,
+            username: extensionState.user.username
+        } : cachedUser;
+        const authed = extensionState.state !== "SIGNED_OUT" || Boolean(user);
+        const state = this.buildSidebarState(snapshot, {
+            user,
+            hasToken: authed
+        });
+        state.drafts = this.cachedDrafts;
+        state.members = this.cachedMembers[state.snapshot.roomId || ""] || [];
+        return state;
+    }
+
+    private buildState(snapshot = this.broadcastHub.getSnapshot(), authState: AuthState): SidebarState {
+        const state = this.buildSidebarState(snapshot, {
+            user: authState.user,
+            hasToken: Boolean(authState.accessToken)
+        });
+        state.members = this.cachedMembers[state.snapshot.roomId || ""] || [];
+        return state;
+    }
+
     private async refreshView(snapshot = this.broadcastHub.getSnapshot()): Promise<void> {
+        const currentCounter = ++this.refreshCounter;
         const authState = await this.authService.getState();
+        if (currentCounter !== this.refreshCounter) {
+            return;
+        }
         const nextState = this.buildState(snapshot, authState);
-        nextState.drafts = await this.loadDrafts(nextState.authed);
+        
+        // 1. Instantly post update with in-memory cached drafts and members to eliminate network latency
+        nextState.drafts = this.cachedDrafts;
+        nextState.members = this.cachedMembers[nextState.snapshot.roomId || ""] || [];
         await this.view?.webview.postMessage({
             type: "state",
             state: nextState,
         });
+
+        // 2. Fetch fresh drafts and members asynchronously in the background and update when loaded
+        if (nextState.authed) {
+            try {
+                const roomId = nextState.snapshot.roomId;
+                const token = authState.accessToken;
+                
+                const promises: Promise<any>[] = [this.loadDrafts(nextState.authed)];
+                if (roomId && token) {
+                    promises.push(this.authService.listMembers(roomId, token).catch(() => []));
+                } else {
+                    promises.push(Promise.resolve([]));
+                }
+
+                const [freshDrafts, freshMembers] = await Promise.all(promises);
+
+                if (roomId) {
+                    this.cachedMembers[roomId] = freshMembers;
+                }
+
+                if (currentCounter === this.refreshCounter) {
+                    nextState.drafts = freshDrafts;
+                    nextState.members = freshMembers;
+                    await this.view?.webview.postMessage({
+                        type: "state",
+                        state: nextState,
+                    });
+                }
+            } catch (error) {
+                // Ignore background loading errors
+            }
+        }
     }
 
     private async loadDrafts(authed: boolean): Promise<readonly Draft[]> {
@@ -298,12 +363,221 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
         const fontUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, "media", "fonts", "Arima-font.ttf")
         );
+
+        const authed = Boolean(state.authed && state.user);
+        const snapshot = state.snapshot || {};
+        const collaborators = Array.isArray(snapshot.collaborators) ? snapshot.collaborators : [];
+        const roomName = snapshot.room?.name || 'No room selected';
+        const branchName = snapshot.session?.branch || state.knownSession?.branch || 'No branch';
+        const sessionId = snapshot.session?.id || state.knownSession?.sessionId || 'No session';
+        const activeFile = state.activeFile || 'No active file';
+        const accountName = state.user?.name || state.localUserName || 'Not signed in';
+        const roomRepoUrl = snapshot.room?.repoUrl || 'No room';
+        const inRoom = state.conduitState === 'IN_ROOM_NO_SESSION' || state.conduitState === 'IN_ROOM_IN_SESSION';
+
+        const escapeHtml = (val: string) => String(val)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+        const stateLabel = (s: string) => {
+            switch (s) {
+                case 'connected': return 'Connected';
+                case 'connecting': return 'Connecting';
+                case 'reconnecting': return 'Reconnecting';
+                case 'error': return 'Error';
+                default: return 'Disconnected';
+            }
+        };
+
+        const stateColor = (s: string) => {
+            switch (s) {
+                case 'connected': return 'var(--good)';
+                case 'error': return 'var(--bad)';
+                default: return 'var(--warn)';
+            }
+        };
+
+        const roomTitleHtml = escapeHtml(authed ? roomName : 'Sign in to continue');
+        const subtitleHtml = escapeHtml(authed
+            ? 'Signed in as ' + accountName
+            : 'Sign in to create, join, and restore sessions.');
+
+        const connectionPillHtml = `<span class="dot" style="background:${stateColor(snapshot.state || '')}"></span>${escapeHtml(stateLabel(snapshot.state || ''))}`;
+
+        const detailsHtml = authed
+            ? [
+                ['Current branch', branchName, 'value'],
+                ['Active file', activeFile, 'value code'],
+                ['Room ID', snapshot.roomId || 'No room', 'value code'],
+                ...(inRoom ? [
+                  ['Room name', snapshot.room?.name || 'No room', 'value'],
+                  ['Room URL', roomRepoUrl, 'value code'],
+                ] : []),
+                ['Session', sessionId, 'value code'],
+                ['Participants', String(collaborators.length), 'value'],
+                ['Account', accountName, 'value'],
+              ]
+                .map((item) => `<div class="detail"><div class="label">${escapeHtml(item[0])}</div><div class="${item[2]}">${escapeHtml(item[1])}</div></div>`)
+                .join('')
+            : '<div class="empty" style="grid-column: 1 / -1;">Sign in to create or join a room, manage drafts, and see collaborators.</div>';
+
+        const actionsHtml = state.buttons
+            .map((btn) => {
+                const cls = [
+                    btn.primary ? '' : 'secondary',
+                    btn.disabled ? 'disabled' : ''
+                ].filter(Boolean).join(' ');
+                const disabledAttr = btn.disabled ? 'disabled' : '';
+                const style = btn.disabled
+                    ? 'opacity:0.4;cursor:not-allowed;pointer-events:none;'
+                    : '';
+                return `<button data-action="${escapeHtml(btn.id)}" class="${cls}" ${disabledAttr} style="${style}">${escapeHtml(btn.label)}</button>`;
+            })
+            .join('');
+
+        const collaboratorRole = (col: any, localId: string, ownerId: string | null) => {
+            if (col && col.role) return col.role;
+            if (col && col.userId && ownerId && col.userId === ownerId) return 'Owner';
+            return 'Member';
+        };
+
+        const initials = (name: string) => {
+            const parts = String(name || 'Anonymous').trim().split(/\s+/).filter(Boolean);
+            if (parts.length === 0) return '?';
+            if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+            return (parts[0][0] + parts[1][0]).toUpperCase();
+        };
+
+        const roomOwnerId = snapshot.room ? snapshot.room.ownerId : null;
+        const isCurrentUserOwner = roomOwnerId && state.localUserId === roomOwnerId;
+        const members = state.members || [];
+        const mergedCollaborators: any[] = [];
+        const activeMap = new Map();
+        
+        collaborators.forEach((c: any) => {
+            activeMap.set(c.userId, c);
+        });
+
+        if (members.length > 0) {
+            members.forEach((member: any) => {
+                const activePres = activeMap.get(member.userId);
+                if (activePres) {
+                    mergedCollaborators.push({
+                        userId: member.userId,
+                        name: member.name || activePres.name || 'Anonymous',
+                        color: activePres.color || '#666',
+                        active: true,
+                        role: member.role || activePres.role || 'Member',
+                        status: activePres.status || 'online'
+                    });
+                } else {
+                    mergedCollaborators.push({
+                        userId: member.userId,
+                        name: member.name || 'Anonymous',
+                        color: '#666',
+                        active: false,
+                        role: member.role || 'Member',
+                        status: 'offline'
+                    });
+                }
+            });
+        } else {
+            // Fallback: just show active ones
+            collaborators.forEach((c: any) => {
+                mergedCollaborators.push({
+                    userId: c.userId,
+                    name: c.name || 'Anonymous',
+                    color: c.color || '#666',
+                    active: true,
+                    role: c.role || (c.userId === roomOwnerId ? 'Owner' : 'Member'),
+                    status: c.status || 'online'
+                });
+            });
+        }
+
+        // Sort active on top
+        mergedCollaborators.sort((a, b) => {
+            if (a.active && !b.active) return -1;
+            if (!a.active && b.active) return 1;
+            return 0;
+        });
+
+        const collaboratorsHtml = authed
+            ? (mergedCollaborators.length
+                ? mergedCollaborators
+                    .map((col) => {
+                        const name = col.name || col.userId || 'Anonymous';
+                        const role = col.role;
+                        const isGithubUser = name && name !== 'Conduit User' && name !== 'Anonymous' && !name.includes(' ') && !name.includes('@');
+                        
+                        const avatarHtml = isGithubUser
+                            ? `<div class="avatar" style="background:${escapeHtml(col.color || '#666')};position:relative;display:grid;">
+                                   ${escapeHtml(initials(name))}
+                                   <img src="https://github.com/${escapeHtml(name)}.png" style="position:absolute;top:0;left:0;width:100%;height:100%;border-radius:999px;object-fit:cover;display:block;" onerror="this.remove();" />
+                               </div>`
+                            : `<div class="avatar" style="background:${escapeHtml(col.color || '#666')};display:grid;">${escapeHtml(initials(name))}</div>`;
+
+                        const isOwner = role.toLowerCase() === 'owner' || col.userId === roomOwnerId;
+                        const roleBadgeHtml = isOwner
+                            ? `<span class="owner-crown" title="Room Owner" style="font-size: 16px; margin-right: 4px; display: inline-block; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.5));">👑</span>`
+                            : `<span class="badge ${role.toLowerCase()}">${escapeHtml(role)}</span>`;
+
+                        const banButtonHtml = isCurrentUserOwner && col.userId !== roomOwnerId
+                            ? `<button class="ban-btn" data-action="banUser" data-user-id="${col.userId}" data-user-name="${escapeHtml(name)}" title="Ban user from room" style="padding: 2px 6px; font-size: 10px; border-radius: 6px; background: rgba(255, 75, 75, 0.15); border: 1px solid rgba(255, 75, 75, 0.3); color: #ff8888;">Ban</button>`
+                            : ``;
+
+                        const rightSideHtml = `<div style="display: flex; align-items: center; gap: 6px;">
+                            ${roleBadgeHtml}
+                            ${banButtonHtml}
+                        </div>`;
+
+                        return `
+                        <div class="collaborator ${col.active ? '' : 'inactive'}">
+                            <div class="collaborator-main">
+                                <div class="avatar-wrapper">
+                                    ${avatarHtml}
+                                    <span class="presence ${col.active ? '' : 'offline'}"></span>
+                                </div>
+                                <div class="name-stack">
+                                    <div class="name">${escapeHtml(name)}</div>
+                                    <div class="status">${escapeHtml(col.status || 'online')}</div>
+                                </div>
+                            </div>
+                            ${rightSideHtml}
+                        </div>`;
+                    })
+                    .join('')
+                : '<div class="empty">No collaborators yet.</div>')
+            : '<div class="empty">Sign in to view collaborators.</div>';
+
+        const drafts = state.drafts || [];
+        const draftsHtml = drafts.length
+            ? drafts
+                .map((draft) => {
+                    return `
+                    <div class="collaborator">
+                        <div class="collaborator-main">
+                            <div class="avatar" style="background: linear-gradient(135deg, var(--accent), #5e2f1d);">DS</div>
+                            <div class="name-stack">
+                                <div class="name">${escapeHtml(draft.branch || 'Draft')}</div>
+                                <div class="status">${escapeHtml(draft.id)} · ${escapeHtml(draft.status)}</div>
+                            </div>
+                        </div>
+                        <button class="secondary" data-action="restoreDraft" data-draft-id="${escapeHtml(draft.id)}">Restore</button>
+                    </div>`;
+                })
+                .join('')
+            : '';
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: https://github.com https://avatars.githubusercontent.com; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
   <style>
     @font-face {
       font-family: 'Arima';
@@ -525,6 +799,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       min-width: 0;
     }
 
+    .avatar-wrapper {
+      position: relative;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 auto;
+    }
+
     .avatar {
       position: relative;
       width: 34px;
@@ -549,6 +830,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       border-radius: 999px;
       background: var(--good);
       border: 2px solid color-mix(in srgb, var(--panel) 80%, #000 20%);
+    }
+
+    .presence.offline {
+      background: #7a7a7a;
+    }
+
+    .collaborator.inactive {
+      opacity: 0.5;
+    }
+
+    .ban-btn:hover {
+      background: rgba(255, 75, 75, 0.3) !important;
+      color: #ff9999 !important;
+      transform: none !important;
     }
 
     .name-stack {
@@ -616,31 +911,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
             <img src="${logoUri}" alt="Conduit Logo" style="width: 14px; height: 14px;">
             Conduit
           </div>
-          <h1 id="roomTitle">Loading session...</h1>
-          <div class="subtle" id="subtitle"></div>
+          <h1 id="roomTitle">${roomTitleHtml}</h1>
+          <div class="subtle" id="subtitle">${subtitleHtml}</div>
         </div>
-        <div class="pill" id="connectionPill"></div>
+        <div class="pill" id="connectionPill">${connectionPillHtml}</div>
       </div>
 
-      <div class="details" id="details"></div>
+      <div class="details" id="details">${detailsHtml}</div>
 
-      <div class="actions" id="actions"></div>
+      <div class="actions" id="actions">${actionsHtml}</div>
     </section>
 
     <section class="panel section">
       <div class="section-head">
         <div class="section-title">Active collaborators</div>
-        <div class="count" id="participantCount"></div>
+        <div class="count" id="participantCount">${collaborators.length} collaborator${collaborators.length === 1 ? '' : 's'}</div>
       </div>
-      <div id="collaborators" class="collaborators"></div>
+      <div id="collaborators" class="collaborators">${collaboratorsHtml}</div>
     </section>
 
-    <section class="panel section" id="draftsSection" hidden>
+    <section class="panel section" id="draftsSection" ${drafts.length ? '' : 'hidden'}>
       <div class="section-head">
         <div class="section-title">Drafts</div>
-        <div class="count" id="draftCount"></div>
+        <div class="count" id="draftCount">${drafts.length}</div>
       </div>
-      <div id="drafts" class="collaborators"></div>
+      <div id="drafts" class="collaborators">${draftsHtml}</div>
     </section>
   </div>
 
@@ -703,14 +998,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       return (parts[0][0] + parts[1][0]).toUpperCase();
     }
 
-    function collaboratorRole(index, collaborator, total, localUserId) {
-      if (collaborator && collaborator.userId && collaborator.userId === localUserId) {
+    function collaboratorRole(collaborator, localUserId, roomOwnerId) {
+      if (collaborator && collaborator.role) {
+        return collaborator.role;
+      }
+      if (collaborator && collaborator.userId && roomOwnerId && collaborator.userId === roomOwnerId) {
         return 'Owner';
       }
-      if (index === 0) {
-        return 'Owner';
-      }
-      return total > 1 ? 'Admin' : 'Member';
+      return 'Member';
     }
 
     function deriveConduitState(state) {
@@ -791,27 +1086,107 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
         })
         .join('');
 
-      participantCountEl.textContent = collaborators.length + ' collaborator' + (collaborators.length === 1 ? '' : 's');
+      const members = Array.isArray(state.members) ? state.members : [];
+      const mergedCollaborators = [];
+      const activeMap = new Map();
+      collaborators.forEach((c) => {
+        activeMap.set(c.userId, c);
+      });
+
+      const roomOwnerId = state.snapshot && state.snapshot.room ? state.snapshot.room.ownerId : null;
+      const isCurrentUserOwner = roomOwnerId && state.localUserId === roomOwnerId;
+
+      if (members.length > 0) {
+        members.forEach((member) => {
+          const activePres = activeMap.get(member.userId);
+          if (activePres) {
+            mergedCollaborators.push({
+              userId: member.userId,
+              name: member.name || activePres.name || 'Anonymous',
+              color: activePres.color || '#666',
+              active: true,
+              role: member.role || activePres.role || 'Member',
+              status: activePres.status || 'online'
+            });
+          } else {
+            mergedCollaborators.push({
+              userId: member.userId,
+              name: member.name || 'Anonymous',
+              color: '#666',
+              active: false,
+              role: member.role || 'Member',
+              status: 'offline'
+            });
+          }
+        });
+      } else {
+        // Fallback: just show active ones
+        collaborators.forEach((c) => {
+          mergedCollaborators.push({
+            userId: c.userId,
+            name: c.name || 'Anonymous',
+            color: c.color || '#666',
+            active: true,
+            role: c.role || (c.userId === roomOwnerId ? 'Owner' : 'Member'),
+            status: c.status || 'online'
+          });
+        });
+      }
+
+      // Sort active on top
+      mergedCollaborators.sort((a, b) => {
+        if (a.active && !b.active) return -1;
+        if (!a.active && b.active) return 1;
+        return 0;
+      });
+
+      participantCountEl.textContent = mergedCollaborators.length + ' collaborator' + (mergedCollaborators.length === 1 ? '' : 's');
 
       collaboratorsEl.innerHTML = authed
-        ? (collaborators.length
-            ? collaborators
+        ? (mergedCollaborators.length
+            ? mergedCollaborators
                 .map((collaborator, index) => {
                   const name = collaborator.name || collaborator.userId || 'Anonymous';
-                  const role = collaboratorRole(index, collaborator, collaborators.length, state.localUserId);
+                  const role = collaborator.role;
+                  const isGithubUser = name && name !== 'Conduit User' && name !== 'Anonymous' && !name.includes(' ') && !name.includes('@');
+                  
+                  let avatarHtml = '';
+                  if (isGithubUser) {
+                    avatarHtml = '<div class="avatar" style="background:' + escapeHtml(collaborator.color || '#666') + '; position: relative; display: grid;">' +
+                                 escapeHtml(initials(name)) +
+                                 '<img src="https://github.com/' + escapeHtml(name) + '.png" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 999px; object-fit: cover; display: block;" onerror="this.remove();" />' +
+                                 '</div>';
+                  } else {
+                    avatarHtml = '<div class="avatar" style="background:' + escapeHtml(collaborator.color || '#666') + '; display: grid;">' + escapeHtml(initials(name)) + '</div>';
+                  }
+
+                  const isOwner = role.toLowerCase() === 'owner' || collaborator.userId === roomOwnerId;
+                  const roleBadgeHtml = isOwner
+                      ? '<span class="owner-crown" title="Room Owner" style="font-size: 16px; margin-right: 4px; display: inline-block; filter: drop-shadow(0 0 2px rgba(255, 215, 0, 0.5));">👑</span>'
+                      : '<span class="badge ' + role.toLowerCase() + '">' + escapeHtml(role) + '</span>';
+
+                  const banButtonHtml = isCurrentUserOwner && collaborator.userId !== roomOwnerId
+                      ? '<button class="ban-btn" data-action="banUser" data-user-id="' + collaborator.userId + '" data-user-name="' + escapeHtml(name) + '" title="Ban user from room" style="padding: 2px 6px; font-size: 10px; border-radius: 6px; background: rgba(255, 75, 75, 0.15); border: 1px solid rgba(255, 75, 75, 0.3); color: #ff8888;">Ban</button>'
+                      : '';
+
+                  const rightSideHtml = '<div style="display: flex; align-items: center; gap: 6px;">' +
+                      roleBadgeHtml +
+                      banButtonHtml +
+                      '</div>';
+
                   return [
-                    '<div class="collaborator">',
+                    '<div class="collaborator ' + (collaborator.active ? '' : 'inactive') + '">',
                       '<div class="collaborator-main">',
-                        '<div class="avatar" style="background:' + escapeHtml(collaborator.color || '#666') + '">',
-                          escapeHtml(initials(name)),
-                          '<span class="presence"></span>',
+                        '<div class="avatar-wrapper">',
+                          avatarHtml,
+                          '<span class="presence ' + (collaborator.active ? '' : 'offline') + '"></span>',
                         '</div>',
                         '<div class="name-stack">',
                           '<div class="name">' + escapeHtml(name) + '</div>',
                           '<div class="status">' + escapeHtml(collaborator.status || 'online') + '</div>',
                         '</div>',
                       '</div>',
-                      '<span class="badge ' + role.toLowerCase() + '">' + escapeHtml(role) + '</span>',
+                      rightSideHtml,
                     '</div>',
                   ].join('');
                 })
@@ -856,6 +1231,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
       vscode.postMessage({
         type: button.dataset.action,
         draftId: button.dataset.draftId,
+        userId: button.dataset.userId,
+        userName: button.dataset.userName,
       });
     });
 
@@ -869,9 +1246,40 @@ export class SidebarProvider implements vscode.WebviewViewProvider, vscode.Dispo
     });
 
     render(initialState);
+    vscode.postMessage({
+      type: 'ready'
+    });
   </script>
 </body>
 </html>`;
+    }
+
+    private async banUser(userId: string, userName?: string): Promise<void> {
+        const state = await this.authService.requireState();
+        const snapshot = this.broadcastHub.getSnapshot();
+        const roomId = snapshot.room?.id ?? snapshot.roomId;
+        if (!roomId) {
+            void vscode.window.showErrorMessage("No room selected");
+            return;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+            `Are you sure you want to ban ${userName || 'this user'}?`,
+            { modal: true },
+            "Yes, Ban"
+        );
+
+        if (confirm !== "Yes, Ban") {
+            return;
+        }
+
+        try {
+            await this.authService.banMember(roomId, userId, "Banned by room owner", state.accessToken);
+            void vscode.window.showInformationMessage(`Successfully banned ${userName || 'user'}.`);
+            void this.refreshView();
+        } catch (error: any) {
+            void vscode.window.showErrorMessage(`Failed to ban user: ${error.message || String(error)}`);
+        }
     }
 }
 

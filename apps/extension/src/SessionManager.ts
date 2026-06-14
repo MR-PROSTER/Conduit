@@ -93,6 +93,7 @@ interface AwarenessUserState {
   readonly id: string;
   readonly name: string;
   readonly color: string;
+  readonly role?: string;
 }
 
 interface AwarenessEnvelope {
@@ -226,25 +227,6 @@ export class SessionManager implements vscode.Disposable {
   public async leaveGraceful(): Promise<void> {
     if (this.isDisposed) {
       return;
-    }
-
-    if (this.activeSession) {
-      try {
-        const draft = await this.saveDraftFromSession();
-        const workspaceFolder = this.getWorkspaceFolderForRepo(
-          this.activeSession.repoPath
-        );
-        await this.localFallbackStore.saveFallback(
-          draft,
-          "User left collaborative session",
-          workspaceFolder
-        );
-      } catch (error) {
-        this.broadcastHub.log(
-          "warn",
-          `Failed to save draft on graceful leave: ${this.stringifyError(error)}`
-        );
-      }
     }
 
     await this.teardownSession(this.activeSession, {
@@ -490,16 +472,28 @@ export class SessionManager implements vscode.Disposable {
     readonly diff: string;
   }> {
     const drafts = await this.discoverDrafts();
-    const leftDraft = drafts.find((entry) => entry.draft.id === leftDraftId);
-    const rightDraft = drafts.find((entry) => entry.draft.id === rightDraftId);
-    if (!leftDraft || !rightDraft) {
+    const leftDraftMetadata = drafts.find((entry) => entry.draft.id === leftDraftId);
+    const rightDraftMetadata = drafts.find((entry) => entry.draft.id === rightDraftId);
+    if (!leftDraftMetadata || !rightDraftMetadata) {
       throw new Error("One or more selected drafts could not be found.");
+    }
+
+    let leftDraft = leftDraftMetadata.draft;
+    let rightDraft = rightDraftMetadata.draft;
+
+    const token = await this.getFreshToken() || this.activeSession?.accessToken;
+
+    if (leftDraftMetadata.source === "remote" && this.authService && token) {
+      leftDraft = await this.authService.getDraft(leftDraftId, token);
+    }
+    if (rightDraftMetadata.source === "remote" && this.authService && token) {
+      rightDraft = await this.authService.getDraft(rightDraftId, token);
     }
 
     const draftManager = this.getDraftManager();
     return {
-      comparison: draftManager.compareDrafts(leftDraft.draft, rightDraft.draft),
-      diff: await draftManager.generateDiff(leftDraft.draft, rightDraft.draft)
+      comparison: draftManager.compareDrafts(leftDraft, rightDraft),
+      diff: await draftManager.generateDiff(leftDraft, rightDraft)
     };
   }
 
@@ -805,6 +799,13 @@ export class SessionManager implements vscode.Disposable {
       });
     } catch {
       // Ignore missing drafts during discard.
+    }
+
+    try {
+      await this.updateRemoteDraftStatus(session.session.id, "discarded");
+      await this.localFallbackStore.clearFallback(session.session.id);
+    } catch {
+      // Ignore remote/fallback cleanup failures during discard
     }
 
     await this.teardownSession(session, {
@@ -1800,10 +1801,12 @@ export class SessionManager implements vscode.Disposable {
 
   private publishLocalPresence(session: ActiveRealtimeSession): void {
     const color = session.cursorManager.assignColor(session.localUserId);
+    const role = session.localUserId === session.room.ownerId ? "Owner" : "Member";
     session.awareness.setLocalStateField("user", {
       id: session.localUserId,
       name: session.localUserName,
-      color
+      color,
+      role
     });
     this.updateLocalActiveFile(session);
   }
@@ -1827,7 +1830,8 @@ export class SessionManager implements vscode.Disposable {
         userId: user.id,
         name: user.name,
         color: user.color,
-        status: "online"
+        status: "online",
+        role: user.role || (user.id === session.room.ownerId ? "Owner" : "Member")
       });
 
       if (

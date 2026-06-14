@@ -583,40 +583,57 @@ export class DraftManager {
     }
   }
 
+  private diffLines(before: string, after: string): string[] {
+    const beforeLines = before.split(/\r?\n/);
+    const afterLines = after.split(/\r?\n/);
+    const m = beforeLines.length;
+    const n = afterLines.length;
+
+    const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (beforeLines[i - 1] === afterLines[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+
+    const diffResult: string[] = [];
+    let i = m;
+    let j = n;
+
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && beforeLines[i - 1] === afterLines[j - 1]) {
+        diffResult.push(` ${beforeLines[i - 1]}`);
+        i--;
+        j--;
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        diffResult.push(`+${afterLines[j - 1]}`);
+        j--;
+      } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
+        diffResult.push(`-${beforeLines[i - 1]}`);
+        i--;
+      }
+    }
+
+    return diffResult.reverse();
+  }
+
   private buildUnifiedDiff(
     relativePath: string,
     before: string,
     after: string
   ): string {
-    const beforeLines = before.split("\n");
-    const afterLines = after.split("\n");
-    const maxLineCount = Math.max(beforeLines.length, afterLines.length);
     const diffLines = [
       `diff --conduit a/${relativePath} b/${relativePath}`,
       `--- a/${relativePath}`,
       `+++ b/${relativePath}`
     ];
 
-    for (let index = 0; index < maxLineCount; index += 1) {
-      const previousLine = beforeLines[index];
-      const nextLine = afterLines[index];
-
-      if (previousLine === nextLine) {
-        if (previousLine !== undefined) {
-          diffLines.push(` ${previousLine}`);
-        }
-        continue;
-      }
-
-      if (previousLine !== undefined) {
-        diffLines.push(`-${previousLine}`);
-      }
-
-      if (nextLine !== undefined) {
-        diffLines.push(`+${nextLine}`);
-      }
-    }
-
+    diffLines.push(...this.diffLines(before, after));
     return diffLines.join("\n");
   }
 

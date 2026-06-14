@@ -345,8 +345,15 @@ export class DraftRestoreController {
 
   private async loadDraftItems(): Promise<readonly DraftQuickPickItem[]> {
     const currentBranch = await this.wsClient.getCurrentBranch();
+    const activeSession = this.wsClient.getState().session;
     const drafts = (await this.wsClient.discoverDrafts()).filter((draft) => {
-      return draft.draft.status === "active";
+      if (draft.draft.status !== "active") {
+        return false;
+      }
+      if (activeSession && draft.draft.sessionId === activeSession.id) {
+        return false;
+      }
+      return true;
     });
 
     const items = await Promise.all(

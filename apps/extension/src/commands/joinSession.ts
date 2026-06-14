@@ -254,6 +254,7 @@ export const joinSessionCommand = (
         "info",
         `Joined collaborative session ${selectedDiscoveredSession.entry.session.id}`
       );
+      void services.draftRestoreController.promptToRestoreUnresolvedDrafts();
       return;
     }
 
@@ -378,5 +379,6 @@ export const joinSessionCommand = (
       "info",
       `Joined collaborative session ${session.id} for branch ${branch}`
     );
+    void services.draftRestoreController.promptToRestoreUnresolvedDrafts();
   });
 };

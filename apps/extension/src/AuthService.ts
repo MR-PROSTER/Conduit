@@ -23,6 +23,8 @@ export interface AuthenticatedState {
 }
 
 export class AuthService {
+  private cachedToken: string | undefined;
+
   public constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly websocketUrl: string
@@ -32,11 +34,11 @@ export class AuthService {
     try {
       const parts = token.split(".");
       if (parts.length !== 3) {
-        return true;
+        return false;
       }
       const payloadPart = parts[1];
       if (!payloadPart) {
-        return true;
+        return false;
       }
       const payloadJson = Buffer.from(payloadPart, "base64").toString("utf-8");
       const payload = JSON.parse(payloadJson) as { exp?: number };
@@ -46,11 +48,25 @@ export class AuthService {
       const bufferSeconds = 60; // 1-minute buffer
       return payload.exp < Date.now() / 1000 + bufferSeconds;
     } catch {
-      return true;
+      return false;
     }
   }
 
+  public getCachedUser(): ConduitUser | undefined {
+    return this.context.globalState.get<ConduitUser>(USER_STATE_KEY);
+  }
+
   public async getState(): Promise<AuthState> {
+    if (this.cachedToken) {
+      const user = this.context.globalState.get<ConduitUser>(USER_STATE_KEY);
+      if (user) {
+        return {
+          accessToken: this.cachedToken,
+          user
+        };
+      }
+    }
+
     const accessToken = await this.context.secrets.get(ACCESS_TOKEN_SECRET_KEY);
     const user = this.context.globalState.get<ConduitUser>(USER_STATE_KEY);
 
@@ -58,11 +74,13 @@ export class AuthService {
       if (this.isTokenExpired(accessToken)) {
         await this.context.secrets.delete(ACCESS_TOKEN_SECRET_KEY);
         await this.context.globalState.update(USER_STATE_KEY, undefined);
+        this.cachedToken = undefined;
         return {
           accessToken: undefined,
           user: undefined
         };
       }
+      this.cachedToken = accessToken;
     }
 
     return {
@@ -99,6 +117,7 @@ export class AuthService {
       payload.accessToken
     );
     await this.context.globalState.update(USER_STATE_KEY, payload.user);
+    this.cachedToken = payload.accessToken;
 
     try {
       const gitName = this.context.globalState.get<string>("conduit.userName") ?? "Conduit User";
@@ -132,6 +151,7 @@ export class AuthService {
 
             await this.context.secrets.store(ACCESS_TOKEN_SECRET_KEY, accessToken);
             await this.context.globalState.update(USER_STATE_KEY, user);
+            this.cachedToken = accessToken;
 
             try {
               const gitName = this.context.globalState.get<string>("conduit.userName") ?? "Conduit User";
@@ -222,6 +242,7 @@ export class AuthService {
   public async signOut(): Promise<void> {
     await this.context.secrets.delete(ACCESS_TOKEN_SECRET_KEY);
     await this.context.globalState.update(USER_STATE_KEY, undefined);
+    this.cachedToken = undefined;
   }
 
   public async updateProfileName(name: string): Promise<void> {

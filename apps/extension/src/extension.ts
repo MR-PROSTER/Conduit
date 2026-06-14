@@ -228,13 +228,13 @@ const initializeStartup = async (services: {
                     "info",
                     "Restored branch-scoped collaborative session"
                 );
+                void draftRestoreController.promptToRestoreUnresolvedDrafts();
             }
         }
     } catch (error) {
         throw error;
     }
 
-    void services.draftRestoreController.promptToRestoreUnresolvedDrafts();
     services.broadcastHub.log("info", "Conduit extension activated");
 };
 
