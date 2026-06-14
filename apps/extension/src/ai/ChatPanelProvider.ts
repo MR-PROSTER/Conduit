@@ -1931,7 +1931,10 @@ export class ChatPanelProvider
         users: `<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>`,
         gitBranch: `<line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path>`,
         lock: `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>`,
-        messageSquare: `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>`
+        messageSquare: `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>`,
+        mic: `<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line>`,
+        volume2: `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>`,
+        loader: `<path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>`
       };
       return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-${name}">${paths[name] || ''}</svg>`;
     };
@@ -1960,12 +1963,12 @@ export class ChatPanelProvider
       --surface: var(--vscode-editor-background, #151515);
       --surface2: var(--vscode-sideBarSectionHeader-background, #202022);
       --border: var(--vscode-panel-border, #333336);
-      --border-focus: #f3c299;
+      --border-focus: var(--vscode-focusBorder, #f3c299);
       --fg: var(--vscode-foreground, #f4f4f5);
       --fg2: var(--vscode-descriptionForeground, #a1a1aa);
-      --accent: #f3c299;
-      --accent-fg: #000000;
-      --focus: #f3c299;
+      --accent: var(--vscode-button-background, #f3c299);
+      --accent-fg: var(--vscode-button-foreground, #000000);
+      --focus: var(--vscode-focusBorder, #f3c299);
       --error: var(--vscode-errorForeground, #f48771);
       --green: var(--vscode-terminal-ansiGreen, #89d185);
       --font: 'Arima', 'Inter', var(--vscode-font-family, sans-serif);
