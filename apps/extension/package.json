@@ -42,7 +42,8 @@
     "onCommand:conduit.restoreDrafts",
     "onCommand:conduit.switchBranch",
     "onView:conduit.sidebar",
-    "onView:conduit.aiPanel"
+    "onView:conduit.aiPanel",
+    "onView:conduit.aiSummary"
   ],
   "contributes": {
     "commands": [
@@ -111,6 +112,11 @@
           "type": "webview",
           "id": "conduit.aiPanel",
           "name": "AI Assistant"
+        },
+        {
+          "type": "webview",
+          "id": "conduit.aiSummary",
+          "name": "AI Summary"
         }
       ]
     },

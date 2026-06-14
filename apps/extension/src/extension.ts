@@ -13,6 +13,7 @@ import { ConduitWebSocketClient } from "./wsClient.js";
 import { getStateManager } from "./state/ExtensionStateManager.js";
 import { ApiKeyStore } from "./ai/ApiKeyStore.js";
 import { ChatPanelProvider } from "./ai/ChatPanelProvider.js";
+import { AiSummaryProvider } from "./ai/AiSummaryProvider.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -131,6 +132,24 @@ export const activate = async (
         { webviewOptions: { retainContextWhenHidden: true } }
     );
 
+    // AI Summary Panel
+    const aiSummaryProvider = new AiSummaryProvider(
+        context,
+        broadcastHub,
+        authService,
+        wsClient
+    );
+    const aiSummaryRegistration = vscode.window.registerWebviewViewProvider(
+        AiSummaryProvider.viewType,
+        aiSummaryProvider
+    );
+
+    context.subscriptions.push(
+        stateManager.onDidChangeState(() => {
+            void aiSummaryProvider.refresh();
+        })
+    );
+
     extensionDisposable = vscode.Disposable.from(
         broadcastHub,
         wsClient,
@@ -138,6 +157,8 @@ export const activate = async (
         sidebarRegistration,
         chatPanelProvider,
         aiPanelRegistration,
+        aiSummaryProvider,
+        aiSummaryRegistration,
         ...commandDisposables
     );
 
