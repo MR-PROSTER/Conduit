@@ -84,10 +84,12 @@ export class ChatRepository {
   }
 
   private mapMessage(row: any): ChatMessage {
+    const senderName = row.users?.name || undefined;
     return {
       id: row.id,
       threadId: row.thread_id,
       senderId: row.sender_id || "",
+      senderName,
       createdAt: row.created_at,
       role: row.role,
       content: row.content || "",
@@ -137,11 +139,13 @@ export class ChatRepository {
     return this.mapThread(data);
   }
 
-  async listThreads(query: { sessionId?: string; createdBy?: string }): Promise<ChatThread[]> {
+  async listThreads(query: { sessionId?: string; sessionIds?: string[]; createdBy?: string }): Promise<ChatThread[]> {
     const supabase = this.checkConfig();
 
     let dbQuery = supabase.from("chat_threads").select("*");
-    if (query.sessionId) {
+    if (query.sessionIds && query.sessionIds.length > 0) {
+      dbQuery = dbQuery.in("session_id", query.sessionIds);
+    } else if (query.sessionId) {
       dbQuery = dbQuery.eq("session_id", query.sessionId);
     }
     if (query.createdBy) {
@@ -177,7 +181,12 @@ export class ChatRepository {
     const { data, error } = await supabase
       .from("chat_messages")
       .insert(insertData)
-      .select()
+      .select(`
+        *,
+        users (
+          name
+        )
+      `)
       .single();
 
     if (error) throw error;
@@ -199,7 +208,12 @@ export class ChatRepository {
       .from("chat_messages")
       .update(updateData)
       .eq("id", id)
-      .select()
+      .select(`
+        *,
+        users (
+          name
+        )
+      `)
       .single();
 
     if (error) throw error;
@@ -215,7 +229,12 @@ export class ChatRepository {
 
     let dbQuery = supabase
       .from("chat_messages")
-      .select("*")
+      .select(`
+        *,
+        users (
+          name
+        )
+      `)
       .eq("thread_id", threadId)
       .order("created_at", { ascending: false })
       .limit(limit + 1);

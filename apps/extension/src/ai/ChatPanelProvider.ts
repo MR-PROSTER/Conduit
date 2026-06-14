@@ -1104,7 +1104,7 @@ export class ChatPanelProvider
   // ----------------------------------------------------------------
   private async ensureGroupThread(sessionId: string): Promise<void> {
     const existing = this.threads.find(
-      (t) => t.sessionId === sessionId && t.type === 'group'
+      (t) => t.type === 'group'
     );
     if (existing) {
       this.activeThreadId = existing.id;
@@ -1138,7 +1138,7 @@ export class ChatPanelProvider
       );
       
       this.threads = threads;
-      const groupThread = threads.find(t => t.type === 'group' && t.sessionId === sessionId);
+      const groupThread = threads.find(t => t.type === 'group');
       if (groupThread) {
         this.activeThreadId = groupThread.id;
         
@@ -1448,12 +1448,8 @@ export class ChatPanelProvider
       }
       const { threads } = await this.apiFetch<{ threads: ChatThread[] }>(url);
       
-      for (const t of threads) {
-        if (!this.threads.some(x => x.id === t.id)) {
-          this.threads.push(t);
-          this.messagesByThread.set(t.id, []);
-        }
-      }
+      this.threads = threads;
+      this.messagesByThread.clear();
       
       await Promise.all(
         threads.map(async (t) => {
@@ -1483,7 +1479,13 @@ export class ChatPanelProvider
       }
     }
 
-    const activeId = this.activeThreadId ?? this.threads[0]!.id;
+    let activeId = this.activeThreadId;
+    if (!activeId || !this.threads.some((t) => t.id === activeId)) {
+      const groupThread = this.threads.find((t) => t.type === 'group');
+      activeId = groupThread ? groupThread.id : this.threads[0]!.id;
+    }
+    this.activeThreadId = activeId;
+
     this.post({
       type: 'init',
       threads: this.threads,
@@ -1514,6 +1516,8 @@ export class ChatPanelProvider
     id?: string,
     attachments?: import('@conduit/shared-types').AttachmentMeta[]
   ): ChatMessage {
+    const cachedUser = this.authService.getCachedUser();
+    const senderName = senderId === cachedUser?.id ? (cachedUser?.username || cachedUser?.email || undefined) : undefined;
     return {
       id: id ?? this.generateId(),
       threadId,
@@ -1525,6 +1529,7 @@ export class ChatPanelProvider
       agentSteps: undefined,
       attachments: attachments && attachments.length > 0 ? attachments : undefined,
       senderId,
+      senderName,
       createdAt: new Date().toISOString(),
     };
   }

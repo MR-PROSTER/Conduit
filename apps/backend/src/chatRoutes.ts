@@ -102,7 +102,17 @@ export function createChatRouter(repo: ChatRepository, authenticator?: any): Rou
 
       await service.assertActiveRoomAccess(user.id, sessionData.room_id);
 
-      const threads = await repo.listThreads({ sessionId });
+      // Query all sessions for this room to fetch all threads in the room
+      const { data: sessions, error: sessionsError } = await supabase
+        .from("sessions")
+        .select("id")
+        .eq("room_id", sessionData.room_id);
+
+      if (sessionsError) throw sessionsError;
+
+      const sessionIds = (sessions || []).map((s: any) => s.id);
+
+      const threads = await repo.listThreads({ sessionIds });
       res.json({ threads });
     } catch (error) {
       sendError(res, error);
