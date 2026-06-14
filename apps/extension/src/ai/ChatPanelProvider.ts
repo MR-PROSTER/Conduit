@@ -942,7 +942,7 @@ export class ChatPanelProvider
         chatArray.push([JSON.stringify(finalMsg)]);
       }
     } catch (err) {
-      const errorContent = `❌ ${err instanceof Error ? err.message : 'An error occurred.'}`;
+      const errorContent = `Error: ${err instanceof Error ? err.message : 'An error occurred.'}`;
       const errMsg: ChatMessage = { ...placeholder, content: errorContent };
       this.updateMessage(threadId, msgId, errMsg);
       this.post({ type: 'messageDone', messageId: msgId, totalTokens: 0, model: provider.modelId });
@@ -982,7 +982,7 @@ export class ChatPanelProvider
     images?: ImageAttachment[]
   ): Promise<void> {
     const msgId = this.generateId();
-    const placeholder = this.makeMessage(threadId, 'assistant', '🤖 Agent starting…', senderId, msgId);
+    const placeholder = this.makeMessage(threadId, 'assistant', 'Agent starting…', senderId, msgId);
     this.addMessage(threadId, placeholder);
     this.post({ type: 'messageAdded', message: placeholder });
 
@@ -993,7 +993,7 @@ export class ChatPanelProvider
         body: JSON.stringify({
           id: msgId,
           role: 'assistant',
-          content: '🤖 Agent starting…',
+          content: 'Agent starting…',
           model: provider.modelId,
         }),
       });
@@ -1065,8 +1065,8 @@ export class ChatPanelProvider
     );
 
     const finalContent = result.success
-      ? `✅ Task complete.\n\n${result.error ?? ''}`
-      : `⚠️ Agent stopped: ${result.error ?? 'Unknown error'}`;
+      ? `Task complete.\n\n${result.error ?? ''}`
+      : `Agent stopped: ${result.error ?? 'Unknown error'}`;
 
     const finalMsg: ChatMessage = {
       ...placeholder,
@@ -1599,7 +1599,6 @@ export class ChatPanelProvider
       const afterContent = await fs.readFile(absPath, 'utf-8').catch(() => '');
 
       // Reconstruct before-content from the diff hunks
-      const afterLines = afterContent.split('\n');
       const beforeLines: string[] = [];
       for (const hunk of diff.hunks) {
         for (const line of hunk.lines) {
@@ -1621,7 +1620,7 @@ export class ChatPanelProvider
 
       await vscode.commands.executeCommand('vscode.diff', beforeUri, afterUri, title);
     } catch (err) {
-      console.error('openDiffEditor failed:', err);
+      console.error(err);
     }
   }
 
@@ -1639,6 +1638,37 @@ export class ChatPanelProvider
       `img-src data: vscode-resource:`,
     ].join('; ');
 
+    const getIconSvg = (name: string, size = 14) => {
+      const paths: Record<string, string> = {
+        history: `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>`,
+        plus: `<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>`,
+        plusCircle: `<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line>`,
+        settings: `<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>`,
+        code: `<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>`,
+        star: `<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="9.17" y1="9.17" x2="14.83" y2="14.83"/><line x1="9.17" y1="14.83" x2="14.83" y2="9.17"/>`,
+        send: `<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline>`,
+        stop: `<rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>`,
+        pause: `<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>`,
+        play: `<polygon points="5 3 19 12 5 21 5 3"></polygon>`,
+        paperclip: `<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>`,
+        file: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>`,
+        image: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>`,
+        trash: `<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>`,
+        plan: `<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><line x1="9" y1="9" x2="15" y2="9"></line><line x1="9" y1="13" x2="15" y2="13"></line><line x1="9" y1="17" x2="13" y2="17"></line>`,
+        read: `<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>`,
+        edit: `<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>`,
+        safety: `<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>`,
+        verify: `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>`,
+        error: `<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>`,
+        x: `<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>`,
+        users: `<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>`,
+        gitBranch: `<line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path>`,
+        lock: `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>`,
+        messageSquare: `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>`
+      };
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-${name}">${paths[name] || ''}</svg>`;
+    };
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1647,7 +1677,7 @@ export class ChatPanelProvider
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <title>Conduit Copilot</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     @font-face {
       font-family: 'Arima';
@@ -1657,181 +1687,1033 @@ export class ChatPanelProvider
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    
     :root {
       --bg: var(--vscode-sideBar-background, #1e1e1e);
-      --surface: var(--vscode-editor-background, #252526);
-      --surface2: var(--vscode-sideBarSectionHeader-background, #2d2d2d);
-      --border: var(--vscode-panel-border, #3c3c3c);
-      --fg: var(--vscode-foreground, #cccccc);
-      --fg2: var(--vscode-descriptionForeground, #858585);
-      --accent: var(--vscode-button-background, #0e639c);
-      --accent-fg: var(--vscode-button-foreground, #ffffff);
-      --focus: var(--vscode-focusBorder, #007acc);
+      --surface: var(--vscode-editor-background, #151515);
+      --surface2: var(--vscode-sideBarSectionHeader-background, #202022);
+      --border: var(--vscode-panel-border, #333336);
+      --border-focus: #f3c299;
+      --fg: var(--vscode-foreground, #f4f4f5);
+      --fg2: var(--vscode-descriptionForeground, #a1a1aa);
+      --accent: #f3c299;
+      --accent-fg: #000000;
+      --focus: #f3c299;
       --error: var(--vscode-errorForeground, #f48771);
       --green: var(--vscode-terminal-ansiGreen, #89d185);
-      --yellow: var(--vscode-charts-yellow, #cca700);
       --font: 'Arima', 'Inter', var(--vscode-font-family, sans-serif);
       --mono: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
       --radius: 8px;
     }
-    html, body { height: 100%; background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 13px; line-height: 1.5; overflow: hidden; }
-    #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    html, body { height: 100%; background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 12px; line-height: 1.5; overflow: hidden; }
+    #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: #151515; }
 
     /* Header */
-    .app-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
-    .app-title { font-size: 13px; font-weight: 600; flex: 1; }
-    .session-pill { font-size: 10px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--fg2); text-transform: capitalize; }
-    #btn-new-thread, #btn-toggle-settings { font-size: 16px; padding: 2px 6px; border-radius: 4px; color: var(--fg2); cursor: pointer; border: none; background: none; }
-    #btn-toggle-settings { font-size: 14px; transition: transform 0.2s; }
-    #btn-toggle-settings.active { transform: rotate(45deg); }
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent);
+    }
+    .app-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--fg);
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .session-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      color: var(--fg2);
+      background: var(--surface2);
+      text-transform: capitalize;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background-color: var(--green);
+      border-radius: 50%;
+    }
+    .header-icon-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--fg2);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      transition: color 0.15s, background-color 0.15s;
+    }
+    .header-icon-btn:hover {
+      color: var(--fg);
+      background-color: var(--surface2);
+    }
+    .header-icon-btn.active {
+      color: var(--accent);
+      background-color: var(--surface2);
+    }
 
     /* Settings Drawer */
-    .settings-drawer { padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--surface); overflow-y: auto; max-height: 360px; flex-shrink: 0; }
-    .settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    .settings-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg2); }
-    .settings-close { font-size: 16px; color: var(--fg2); padding: 0 4px; cursor: pointer; border: none; background: none; }
-    .provider-row { margin-bottom: 16px; }
-    .provider-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .provider-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); text-transform: capitalize; cursor: pointer; user-select: none; }
-    .provider-badge.active { background: var(--accent); color: var(--accent-fg); }
-    .provider-status-text { font-size: 10px; color: var(--green); }
-    .provider-input-group { display: flex; gap: 6px; }
-    .provider-input-group input { flex: 1; font-size: 12px; font: inherit; color: var(--fg); background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; outline: none; }
-    .provider-input-group input:focus { border-color: var(--focus); }
-    .provider-input-group button { padding: 4px 10px; border-radius: 6px; font-size: 12px; background: var(--accent); color: var(--accent-fg); border: none; cursor: pointer; }
-    .provider-input-group button.saved { background: var(--green); color: #000; }
-    .provider-model-select { margin-top: 6px; width: 100%; font-size: 12px; padding: 4px 6px; border-radius: 4px; background: var(--surface2); color: var(--fg); border: 1px solid var(--border); outline: none; }
+    .settings-drawer {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      overflow-y: auto;
+      max-height: 360px;
+      flex-shrink: 0;
+    }
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .settings-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--fg2);
+    }
+    .settings-close {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--fg2);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      transition: color 0.15s;
+    }
+    .settings-close:hover {
+      color: var(--fg);
+    }
+    .provider-row {
+      margin-bottom: 14px;
+    }
+    .provider-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .provider-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      text-transform: capitalize;
+      cursor: pointer;
+      user-select: none;
+      background: var(--surface2);
+      color: var(--fg2);
+      transition: all 0.15s;
+    }
+    .provider-badge.active {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-color: var(--accent);
+    }
+    .provider-status-text {
+      font-size: 10px;
+      color: var(--green);
+      font-weight: 500;
+    }
+    .provider-input-group {
+      display: flex;
+      gap: 6px;
+    }
+    .provider-input-group input {
+      flex: 1;
+      font-size: 12px;
+      font-family: inherit;
+      color: var(--fg);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 6px 10px;
+      outline: none;
+    }
+    .provider-input-group input:focus {
+      border-color: var(--focus);
+    }
+    .provider-input-group button {
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      background: var(--accent);
+      color: var(--accent-fg);
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: background-color 0.15s;
+    }
+    .provider-input-group button.saved {
+      background: var(--green);
+      color: #000;
+    }
+    .provider-model-select {
+      margin-top: 6px;
+      width: 100%;
+      font-size: 12px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: var(--surface2);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      outline: none;
+    }
 
     /* Warning Banner */
-    .warning-banner { padding: 8px 12px; background: rgba(204,167,0,0.1); border-bottom: 1px solid var(--yellow); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-    .warning-text { font-size: 12px; color: var(--yellow); flex: 1; }
-    #btn-setup-warning { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--yellow); color: #000; font-weight: 600; border: none; cursor: pointer; }
+    .warning-banner {
+      padding: 8px 14px;
+      background: rgba(244, 135, 113, 0.1);
+      border-bottom: 1px solid var(--error);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .warning-text {
+      font-size: 11px;
+      color: var(--error);
+      flex: 1;
+      font-weight: 500;
+    }
+    #btn-setup-warning {
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--error);
+      color: #fff;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+    }
 
     /* Pinned Files Bar */
-    .pinned-files-bar { display: flex; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; flex-shrink: 0; background: var(--surface); }
-    .pinned-file-badge { display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); font-size: 11px; color: var(--fg2); }
-    .pinned-file-remove { font-size: 12px; color: var(--fg2); cursor: pointer; border: none; background: none; line-height: 1; }
+    .pinned-files-bar {
+      display: flex;
+      gap: 6px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+      flex-shrink: 0;
+      background: var(--bg);
+    }
+    .pinned-file-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--fg2);
+    }
+    .pinned-file-text {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .pinned-file-remove {
+      font-size: 12px;
+      color: var(--fg2);
+      cursor: pointer;
+      border: none;
+      background: none;
+      line-height: 1;
+    }
+    .pinned-file-remove:hover {
+      color: var(--fg);
+    }
 
     /* Chat History */
-    .chat-history { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; }
-    .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--fg2); gap: 8px; }
-    .empty-icon { font-size: 32px; }
-    .empty-text { font-size: 13px; text-align: center; max-width: 240px; }
+    .chat-history {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: #151515;
+    }
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--fg2);
+      gap: 10px;
+    }
+    .empty-icon {
+      font-size: 28px;
+      color: var(--accent);
+    }
+    .empty-text {
+      font-size: 12px;
+      text-align: center;
+      max-width: 220px;
+      line-height: 1.4;
+    }
 
     /* Message Bubble */
-    .msg-bubble-container { display: flex; flex-direction: column; margin-bottom: 12px; position: relative; }
-    .msg-bubble-container.user { align-items: flex-end; }
-    .msg-bubble-container.assistant { align-items: flex-start; }
-    .msg-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-    .msg-sender { font-size: 10px; color: var(--fg2); }
-    .msg-model { font-size: 9px; color: var(--fg2); opacity: 0.6; }
-    .msg-time { font-size: 10px; color: var(--fg2); }
-    .msg-bubble { max-width: 94%; padding: 9px 12px; border-radius: 12px; position: relative; }
-    .msg-bubble-container.user .msg-bubble { background: var(--accent); color: var(--accent-fg); border-radius: 12px 12px 4px 12px; }
-    .msg-bubble-container.assistant .msg-bubble { background: var(--surface); border: 1px solid var(--border); color: var(--fg); border-radius: 4px 12px 12px 12px; }
-    .msg-thinking { color: var(--fg2); font-style: italic; font-size: 12px; }
+    .msg-bubble-container {
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      width: 100%;
+    }
+    .msg-bubble-container.user {
+      align-items: flex-end;
+    }
+    .msg-bubble-container.assistant {
+      align-items: flex-start;
+    }
+    .msg-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      font-size: 10px;
+      color: var(--fg2);
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .msg-sender {
+      color: var(--fg2);
+    }
+    .msg-model {
+      font-size: 9px;
+      color: var(--fg2);
+      opacity: 0.6;
+      border-left: 1px solid var(--border);
+      padding-left: 6px;
+    }
+    .msg-time {
+      font-size: 9px;
+      color: var(--fg2);
+      opacity: 0.6;
+    }
+    .msg-bubble {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      position: relative;
+      font-size: 12px;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .msg-bubble p {
+      margin-bottom: 6px;
+    }
+    .msg-bubble p:last-child {
+      margin-bottom: 0;
+    }
+    .msg-bubble ul, .msg-bubble ol {
+      margin-left: 16px;
+      margin-bottom: 6px;
+    }
+    .msg-bubble li {
+      margin-bottom: 2px;
+    }
+    .msg-bubble code {
+      font-family: var(--mono);
+      background: rgba(255, 255, 255, 0.1);
+      padding: 1px 4px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .msg-bubble-container.user .msg-bubble code {
+      background: rgba(0, 0, 0, 0.15);
+    }
+    .msg-bubble-container.user .msg-bubble {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-radius: 12px 12px 2px 12px;
+      font-weight: 500;
+    }
+    .msg-bubble-container.assistant .msg-bubble {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      border-radius: 12px 12px 12px 2px;
+    }
+    .msg-thinking {
+      color: var(--fg2);
+      font-style: italic;
+      font-size: 12px;
+    }
 
     /* Fork Options Overlay */
-    .fork-overlay { display: none; position: absolute; top: -8px; right: 8px; gap: 4px; z-index: 10; }
-    .msg-bubble-container.assistant:hover .fork-overlay { display: flex; }
-    .fork-btn { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); color: var(--fg2); cursor: pointer; }
+    .fork-overlay {
+      display: none;
+      position: absolute;
+      top: -10px;
+      right: 12px;
+      gap: 4px;
+      z-index: 10;
+    }
+    .msg-bubble-container.assistant:hover .fork-overlay {
+      display: flex;
+    }
+    .fork-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--fg2);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .fork-btn:hover {
+      border-color: var(--focus);
+      color: var(--fg);
+      background: var(--bg);
+    }
+    .fork-btn.confirm {
+      background: var(--green);
+      color: #000;
+      border-color: var(--green);
+    }
+    .fork-btn.cancel {
+      background: var(--error);
+      color: #fff;
+      border-color: var(--error);
+    }
 
     /* Context Badge Container */
-    .context-refs-container { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; max-width: 94%; }
-    .context-ref-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--surface2); border: 1px solid var(--border); color: var(--fg2); }
+    .context-refs-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+      max-width: 85%;
+    }
+    .context-ref-badge {
+      font-size: 9px;
+      font-weight: 500;
+      padding: 2px 6px;
+      border-radius: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--fg2);
+    }
 
     /* Markdown & CodeBlock */
-    .code-block-container { position: relative; margin: 8px 0; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
-    .code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px; background: var(--surface2); font-size: 11px; color: var(--fg2); }
-    .code-block-actions { display: flex; gap: 6px; }
-    .code-block-actions button { font-size: 11px; color: var(--fg2); padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; background: transparent; }
-    .code-block-pre { margin: 0; padding: 10px 12px; overflow-x: auto; background: var(--surface); font-family: var(--mono); font-size: 12px; line-height: 1.6; }
+    .code-block-container {
+      position: relative;
+      margin: 10px 0;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .code-block-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 12px;
+      background: var(--bg);
+      font-size: 11px;
+      color: var(--fg2);
+      font-weight: 600;
+    }
+    .code-block-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .code-block-actions button {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--fg2);
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      background: transparent;
+      transition: all 0.15s;
+    }
+    .code-block-actions button:hover {
+      color: var(--fg);
+      background: var(--surface2);
+    }
+    .code-block-pre {
+      margin: 0;
+      padding: 12px;
+      overflow-x: auto;
+      background: #151515;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+    }
 
     /* Agent Step Cards */
-    .agent-step-card { margin-top: 6px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); width: 100%; }
-    .agent-step-header { display: flex; align-items: center; gap: 8px; }
-    .agent-step-title { flex: 1; font-weight: 500; font-size: 12px; }
-    .agent-step-status { font-size: 10px; padding: 1px 6px; border-radius: 8px; color: #fff; font-weight: 600; text-transform: capitalize; }
-    .agent-step-status.pending { background: var(--yellow); }
+    .agent-step-card {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      width: 100%;
+    }
+    .agent-step-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .agent-step-icon {
+      display: flex;
+      align-items: center;
+      color: var(--accent);
+    }
+    .agent-step-title {
+      flex: 1;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--fg);
+    }
+    .agent-step-status {
+      font-size: 9px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      color: #000;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .agent-step-status.pending { background: var(--fg2); }
     .agent-step-status.running { background: var(--accent); }
-    .agent-step-status.done { background: var(--green); color: #000; }
-    .agent-step-status.approved { background: var(--green); color: #000; }
-    .agent-step-status.rejected { background: var(--error); }
-    .agent-step-body { margin-top: 6px; font-size: 11px; color: var(--fg2); white-space: pre-wrap; }
-    .agent-step-safety { margin-top: 8px; padding: 8px; border-radius: 4px; background: rgba(204,167,0,0.1); border: 1px solid var(--yellow); }
-    .agent-step-safety-text { font-size: 12px; color: var(--yellow); }
-    .agent-step-actions { display: flex; gap: 8px; margin-top: 8px; }
-    .agent-step-actions button { padding: 4px 12px; border-radius: 4px; font-weight: 600; font-size: 12px; border: none; cursor: pointer; }
-    .agent-step-actions .btn-approve { background: var(--green); color: #000; }
-    .agent-step-actions .btn-reject { background: var(--error); color: #fff; }
+    .agent-step-status.done { background: var(--green); }
+    .agent-step-status.approved { background: var(--green); }
+    .agent-step-status.rejected { background: var(--error); color: #fff; }
+    .agent-step-body {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--fg2);
+      white-space: pre-wrap;
+      line-height: 1.4;
+    }
+    .agent-step-safety {
+      margin-top: 8px;
+      padding: 8px;
+      border-radius: 6px;
+      background: rgba(244, 135, 113, 0.1);
+      border: 1px solid var(--error);
+    }
+    .agent-step-safety-text {
+      font-size: 11px;
+      color: var(--error);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .agent-step-safety-text code {
+      background: rgba(0,0,0,0.2);
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    .agent-step-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .agent-step-actions button {
+      padding: 4px 14px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 11px;
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .agent-step-actions button:hover {
+      opacity: 0.9;
+    }
+    .agent-step-actions .btn-approve {
+      background: var(--green);
+      color: #000;
+    }
+    .agent-step-actions .btn-reject {
+      background: var(--error);
+      color: #fff;
+    }
 
     /* Diff View */
-    .diff-view { margin-top: 8px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); font-size: 12px; font-family: var(--mono); }
-    .diff-file-path { padding: 4px 10px; background: var(--surface2); color: var(--fg2); font-size: 11px; }
-    .diff-line { padding: 1px 10px; display: flex; }
-    .diff-line.add { background: rgba(137,209,133,0.12); color: var(--green); border-left: 2px solid var(--green); }
-    .diff-line.del { background: rgba(244,135,113,0.12); color: var(--error); border-left: 2px solid var(--error); }
-    .diff-line.ctx { border-left: 2px solid transparent; }
-    .diff-indicator { user-select: none; margin-right: 8px; opacity: 0.5; width: 10px; display: inline-block; }
+    .diff-view {
+      margin-top: 8px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-family: var(--mono);
+      background: #151515;
+    }
+    .diff-file-path {
+      padding: 6px 10px;
+      background: var(--bg);
+      color: var(--fg2);
+      font-size: 10px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .diff-line {
+      padding: 2px 10px;
+      display: flex;
+      line-height: 1.5;
+    }
+    .diff-line.add {
+      background: rgba(137,209,133,0.1);
+      color: var(--green);
+      border-left: 3px solid var(--green);
+    }
+    .diff-line.del {
+      background: rgba(244,135,113,0.1);
+      color: var(--error);
+      border-left: 3px solid var(--error);
+    }
+    .diff-line.ctx {
+      border-left: 3px solid transparent;
+      color: var(--fg2);
+    }
+    .diff-indicator {
+      user-select: none;
+      margin-right: 8px;
+      opacity: 0.5;
+      width: 10px;
+      display: inline-block;
+    }
 
     /* Input Area */
-    .input-area { border-top: 1px solid var(--border); padding: 8px 10px; background: var(--surface); flex-shrink: 0; }
-    .input-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; font-size: 11px; }
-    .mode-toggle button { padding: 3px 12px; font-weight: 600; text-transform: capitalize; border: none; background: transparent; color: var(--fg2); cursor: pointer; transition: background 0.15s; }
-    .mode-toggle button.active { background: var(--accent); color: var(--accent-fg); }
-    .input-meta .model-pill { font-size: 11px; color: var(--fg2); padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); text-transform: capitalize; }
-    .input-meta .token-count { margin-left: auto; font-size: 10px; color: var(--fg2); }
-    .input-meta .token-count.warning { color: var(--error); }
-    .input-wrapper { display: flex; gap: 8px; align-items: flex-end; }
-    .input-wrapper textarea { font: inherit; font-size: 12px; line-height: 1.5; color: var(--fg); background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; width: 100%; outline: none; resize: none; min-height: 44px; max-height: 120px; overflow-y: auto; }
-    .input-wrapper textarea:focus { border-color: var(--focus); }
-    .btn-send { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--accent); color: var(--accent-fg); font-size: 16px; flex-shrink: 0; border: none; cursor: pointer; transition: all 0.15s; }
-    .btn-send:disabled { opacity: 0.4; cursor: default; }
-    .btn-send.stop { background: var(--error); }
-    .btn-pause { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--surface2); color: var(--fg); font-size: 14px; flex-shrink: 0; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; }
-    .btn-pause:hover { border-color: var(--focus); }
-    .btn-attach { width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: transparent; color: var(--fg2); font-size: 14px; flex-shrink: 0; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; }
-    .btn-attach:hover { border-color: var(--focus); color: var(--fg); }
-    .btn-attach.has-images { border-color: var(--accent); color: var(--accent); }
-    .attachment-preview { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 2px 0; }
-    .attachment-chip { position: relative; display: inline-flex; align-items: center; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; max-width: 120px; min-width: 48px; }
-    .attachment-chip img { width: 64px; height: 48px; object-fit: cover; display: block; flex-shrink: 0; }
-    .attachment-chip .remove-img { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 50%; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; flex-shrink: 0; z-index: 1; }
-    .attachment-chip .file-chip-inner { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 8px 6px 6px; min-width: 52px; max-width: 110px; }
-    .attachment-chip .file-chip-icon { font-size: 18px; line-height: 1; }
-    .attachment-chip .file-chip-label { font-size: 9px; color: var(--fg2); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
-    .attachment-chip .file-chip-size { font-size: 8px; color: var(--fg3, var(--fg2)); opacity: 0.7; text-align: center; }
-    .chat-drop-overlay { display: none; position: absolute; inset: 0; z-index: 100; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 2px dashed var(--accent); border-radius: 8px; align-items: center; justify-content: center; pointer-events: none; }
-    .chat-drop-overlay.active { display: flex; }
-    .chat-drop-overlay span { font-size: 15px; color: var(--accent); font-weight: 500; pointer-events: none; }
-    .paused-banner { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: color-mix(in srgb, var(--warn, #f0a500) 15%, transparent); border-top: 1px solid color-mix(in srgb, var(--warn, #f0a500) 40%, transparent); font-size: 11px; color: var(--fg); flex-shrink: 0; }
-    .paused-banner span { flex: 1; }
-    .paused-banner button { font-size: 11px; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface2); color: var(--fg); cursor: pointer; }
-    .diff-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); font-size: 10px; font-family: var(--vscode-editor-font-family, monospace); cursor: pointer; transition: border-color 0.15s; margin-top: 4px; }
-    .diff-chip:hover { border-color: var(--focus); }
-    .diff-chip .adds { color: #4ec994; }
-    .diff-chip .dels { color: #f14c4c; }
-    .diff-chip .fname { color: var(--fg2); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .agent-step-card.running .agent-step-title::after { content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .input-area {
+      border-top: 1px solid var(--border);
+      padding: 12px 14px;
+      background: var(--bg);
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .input-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+    .mode-toggle {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      overflow: hidden;
+      background: var(--surface2);
+      padding: 2px;
+    }
+    .mode-toggle button {
+      padding: 4px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      border: none;
+      background: transparent;
+      color: var(--fg2);
+      cursor: pointer;
+      border-radius: 16px;
+      transition: all 0.15s;
+    }
+    .mode-toggle button.active {
+      background: var(--accent);
+      color: var(--accent-fg);
+    }
+    .model-pill {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--fg);
+      padding: 4px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+    }
+    .token-count {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--fg2);
+    }
+    .token-count.warning {
+      color: var(--error);
+    }
+    .input-wrapper {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .input-wrapper textarea {
+      flex: 1;
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #ffffff;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      outline: none;
+      resize: none;
+      min-height: 48px;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .input-wrapper textarea:focus {
+      border-color: var(--focus);
+    }
+    .btn-send {
+      width: 44px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--accent);
+      color: var(--accent-fg);
+      border: none;
+      cursor: pointer;
+      transition: background-color 0.15s, opacity 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-send:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .btn-send.stop {
+      background: var(--error);
+      color: #ffffff;
+    }
+    .btn-pause {
+      width: 44px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface2);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-pause:hover {
+      border-color: var(--focus);
+    }
+    .btn-attach {
+      width: 36px;
+      height: 48px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: var(--fg2);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-attach:hover {
+      border-color: var(--focus);
+      color: var(--fg);
+    }
+    .btn-attach.has-images {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .attachment-preview {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 0;
+    }
+    .attachment-chip {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      max-width: 120px;
+      min-width: 48px;
+    }
+    .attachment-chip img {
+      width: 64px;
+      height: 48px;
+      object-fit: cover;
+      display: block;
+      flex-shrink: 0;
+    }
+    .attachment-chip .remove-img {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      font-size: 10px;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      flex-shrink: 0;
+      z-index: 1;
+    }
+    .attachment-chip .file-chip-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 6px 8px;
+      min-width: 52px;
+      max-width: 110px;
+    }
+    .attachment-chip .file-chip-icon {
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+    }
+    .attachment-chip .file-chip-label {
+      font-size: 9px;
+      color: var(--fg2);
+      max-width: 90px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: center;
+    }
+    .attachment-chip .file-chip-size {
+      font-size: 8px;
+      color: var(--fg2);
+      opacity: 0.7;
+      text-align: center;
+    }
+    .chat-drop-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 100;
+      background: rgba(243, 194, 153, 0.1);
+      border: 2px dashed var(--accent);
+      border-radius: 8px;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .chat-drop-overlay.active {
+      display: flex;
+    }
+    .chat-drop-overlay span {
+      font-size: 14px;
+      color: var(--accent);
+      font-weight: 600;
+      pointer-events: none;
+    }
+    .paused-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px;
+      background: rgba(244, 135, 113, 0.1);
+      border-top: 1px solid var(--error);
+      font-size: 11px;
+      color: var(--fg);
+      flex-shrink: 0;
+    }
+    .paused-banner span {
+      flex: 1;
+    }
+    .paused-banner button {
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--error);
+      background: transparent;
+      color: var(--error);
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .paused-banner button:hover {
+      background: var(--error);
+      color: #ffffff;
+    }
+    .diff-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      font-size: 10px;
+      font-family: var(--mono);
+      cursor: pointer;
+      transition: border-color 0.15s;
+      margin-top: 6px;
+    }
+    .diff-chip:hover {
+      border-color: var(--focus);
+    }
+    .diff-chip .adds {
+      color: var(--green);
+      font-weight: 600;
+    }
+    .diff-chip .dels {
+      color: var(--error);
+      font-weight: 600;
+    }
+    .diff-chip .fname {
+      color: var(--fg2);
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .agent-step-card.running .agent-step-title::after {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin-left: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
 
     /* Scrollbar */
-    ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    ::-webkit-scrollbar {
+      width: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
 
     /* Threads Drawer */
-    .threads-drawer { padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--surface); overflow-y: auto; max-height: 240px; flex-shrink: 0; }
-    .thread-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-radius: var(--radius); margin-bottom: 4px; cursor: pointer; background: var(--surface2); border: 1px solid transparent; }
-    .thread-item:hover { border-color: var(--focus); }
-    .thread-item.active { background: var(--accent); color: var(--accent-fg); }
-    .thread-name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-    .thread-date { font-size: 10px; opacity: 0.6; margin-left: 8px; }
-    .thread-delete-btn { font-size: 11px; padding: 1px 5px; border-radius: 4px; border: none; background: transparent; color: var(--fg2); cursor: pointer; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; margin-left: 4px; }
-    .thread-item:hover .thread-delete-btn { opacity: 1; }
-    .thread-item.active .thread-delete-btn { color: var(--accent-fg); opacity: 0.7; }
-    .thread-item.active .thread-delete-btn:hover { opacity: 1; }
+    .threads-drawer {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      overflow-y: auto;
+      max-height: 240px;
+      flex-shrink: 0;
+    }
+    .thread-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-radius: var(--radius);
+      margin-bottom: 4px;
+      cursor: pointer;
+      background: var(--surface2);
+      border: 1px solid transparent;
+      transition: all 0.15s;
+    }
+    .thread-item:hover {
+      border-color: var(--focus);
+    }
+    .thread-item.active {
+      background: var(--accent);
+      color: var(--accent-fg);
+    }
+    .thread-name {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .thread-date {
+      font-size: 9px;
+      opacity: 0.6;
+      margin-left: 8px;
+    }
+    .thread-delete-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px;
+      border-radius: 4px;
+      border: none;
+      background: transparent;
+      color: var(--fg2);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+      flex-shrink: 0;
+      margin-left: 6px;
+    }
+    .thread-item:hover .thread-delete-btn {
+      opacity: 1;
+    }
+    .thread-item.active .thread-delete-btn {
+      color: var(--accent-fg);
+      opacity: 0.7;
+    }
+    .thread-item.active .thread-delete-btn:hover {
+      opacity: 1;
+    }
 
     .hidden { display: none !important; }
   </style>
@@ -1840,11 +2722,16 @@ export class ChatPanelProvider
   <div id="app" style="position:relative;">
     <!-- Header -->
     <header class="app-header">
-      <span class="app-title">✦ Conduit Copilot</span>
-      <span id="session-label" class="session-pill">Local</span>
-      <button id="btn-toggle-threads" title="Chat History" style="font-size:14px; padding:2px 6px; border-radius:4px; color:var(--fg2); cursor:pointer; border:none; background:none;">🕰</button>
-      <button id="btn-new-thread" title="New chat">＋</button>
-      <button id="btn-toggle-settings" title="Settings">⚙</button>
+      <div class="header-left">
+        <span class="logo-container">${getIconSvg('star', 16)}</span>
+        <span class="app-title">AI PANEL</span>
+      </div>
+      <div class="header-right">
+        <span id="session-label" class="session-pill">Local</span>
+        <button id="btn-toggle-threads" class="header-icon-btn" title="Chat History">${getIconSvg('code', 14)}</button>
+        <button id="btn-new-thread" class="header-icon-btn" title="New chat">${getIconSvg('plus', 14)}</button>
+        <button id="btn-toggle-settings" class="header-icon-btn" title="Settings">${getIconSvg('settings', 14)}</button>
+      </div>
     </header>
 
     <!-- Settings Drawer -->
@@ -1855,7 +2742,7 @@ export class ChatPanelProvider
 
     <!-- Warning Banner -->
     <div id="warning-banner" class="warning-banner hidden">
-      <span class="warning-text">⚠ No API key. Open ⚙ to add one.</span>
+      <span class="warning-text">No API key. Open Settings to add one.</span>
       <button id="btn-setup-warning">Setup</button>
     </div>
 
@@ -1873,20 +2760,20 @@ export class ChatPanelProvider
           <button id="btn-mode-agent">Agent</button>
         </div>
         <span id="active-model-pill" class="model-pill hidden"></span>
-        <span id="token-count" class="token-count">~0 tk</span>
+        <span id="token-count" class="token-count">0 / 16k tk</span>
       </div>
       <div id="attachment-preview" class="attachment-preview" style="display:none"></div>
-      <div id="chat-drop-overlay" class="chat-drop-overlay"><span>📎 Drop files to attach</span></div>
+      <div id="chat-drop-overlay" class="chat-drop-overlay"><span>Drop files to attach</span></div>
       <div id="paused-banner" class="paused-banner" style="display:none">
-        <span>⏸ Agent paused — type to continue or start a new task</span>
+        <span id="paused-banner-text">Agent paused — type to continue or start a new task</span>
         <button id="btn-abort-agent">Abort</button>
       </div>
       <div class="input-wrapper">
         <textarea id="chat-input" rows="2" placeholder="Ask about your codebase…"></textarea>
         <input type="file" id="file-input" accept="*/*" multiple style="display:none">
-        <button id="btn-attach" class="btn-attach" title="Attach file">📎</button>
-        <button id="btn-pause" class="btn-pause hidden" title="Pause agent">⏸</button>
-        <button id="btn-send" class="btn-send" disabled>↑</button>
+        <button id="btn-attach" class="btn-attach" title="Attach file">${getIconSvg('paperclip', 16)}</button>
+        <button id="btn-pause" class="btn-pause hidden" title="Pause agent">${getIconSvg('pause', 16)}</button>
+        <button id="btn-send" class="btn-send" disabled>${getIconSvg('send', 16)}</button>
       </div>
     </div>
   </div>
@@ -1913,19 +2800,52 @@ export class ChatPanelProvider
       input: '',
       currentUser: null,
       contextTokens: 0,
-      pendingImages: [],      // ImageAttachment[] staged for next send
-      agentPaused: false,     // true while agent is suspended
-      pausedMessageId: null,  // messageId of the paused agent message
-      visionSupported: false, // set by checkVisionSupport response
+      pendingImages: [],
+      agentPaused: false,
+      pausedMessageId: null,
+      visionSupported: false,
       cooldownUser: null,
       cooldownUserName: null
+    };
+
+    // ── Icons mapping for client side JS ──
+    const icons = {
+      history: \`<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>\`,
+      plus: \`<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>\`,
+      plusCircle: \`<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line>\`,
+      settings: \`<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>\`,
+      code: \`<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>\`,
+      star: \`<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="9.17" y1="9.17" x2="14.83" y2="14.83"/><line x1="9.17" y1="14.83" x2="14.83" y2="9.17"/>\`,
+      send: \`<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline>\`,
+      stop: \`<rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>\`,
+      pause: \`<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>\`,
+      play: \`<polygon points="5 3 19 12 5 21 5 3"></polygon>\`,
+      paperclip: \`<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>\`,
+      file: \`<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>\`,
+      image: \`<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>\`,
+      trash: \`<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>\`,
+      plan: \`<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><line x1="9" y1="9" x2="15" y2="9"></line><line x1="9" y1="13" x2="15" y2="13"></line><line x1="9" y1="17" x2="13" y2="17"></line>\`,
+      read: \`<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>\`,
+      edit: \`<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>\`,
+      safety: \`<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>\`,
+      verify: \`<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>\`,
+      error: \`<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>\`,
+      x: \`<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>\`,
+      users: \`<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>\`,
+      gitBranch: \`<line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path>\`,
+      lock: \`<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>\`,
+      messageSquare: \`<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>\`
+    };
+
+    const getIcon = (name, size = 14) => {
+      return \`<svg xmlns="http://www.w3.org/2000/svg" width="\${size}" height="\${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-\${name}">\${icons[name] || ''}</svg>\`;
     };
 
     // ── Helpers ──
     const formatTime = (isoString) => {
       try {
         const d = new Date(isoString);
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
       } catch (e) {
         return '';
       }
@@ -1940,8 +2860,6 @@ export class ChatPanelProvider
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
     };
-
-
 
     // ── CodeBlock Creator ──
     const createCodeBlock = (code, lang) => {
@@ -1963,12 +2881,12 @@ export class ChatPanelProvider
       btnCopy.addEventListener('click', () => {
         navigator.clipboard.writeText(code)
           .then(() => {
-            btnCopy.textContent = '✓ Copied';
+            btnCopy.textContent = 'Copied!';
             setTimeout(() => { btnCopy.textContent = 'Copy'; }, 1500);
           })
           .catch(() => {
             post({ type: 'copyToClipboard', text: code });
-            btnCopy.textContent = '✓ Copied';
+            btnCopy.textContent = 'Copied!';
             setTimeout(() => { btnCopy.textContent = 'Copy'; }, 1500);
           });
       });
@@ -2091,9 +3009,10 @@ export class ChatPanelProvider
       const header = document.createElement('div');
       header.className = 'agent-step-header';
 
-      const icons = { plan: '📋', read: '📖', edit: '✏️', 'safety-check': '🔒', verify: '🔬', done: '✅', error: '❌' };
+      const stepIconNames = { plan: 'plan', read: 'read', edit: 'edit', 'safety-check': 'safety', verify: 'verify', done: 'verify', error: 'error' };
       const iconSpan = document.createElement('span');
-      iconSpan.textContent = icons[step.type] || '•';
+      iconSpan.className = 'agent-step-icon';
+      iconSpan.innerHTML = getIcon(stepIconNames[step.type] || 'file');
       header.appendChild(iconSpan);
 
       const titleSpan = document.createElement('span');
@@ -2120,13 +3039,12 @@ export class ChatPanelProvider
         safetyEl.className = 'agent-step-safety';
         const safetyText = document.createElement('p');
         safetyText.className = 'agent-step-safety-text';
-        safetyText.innerHTML = \`🔒 <strong>\${escapeHtml(step.safetyBlock.peerName)}</strong> is editing <code>\${escapeHtml(step.safetyBlock.filePath)}</code>\`;
+        safetyText.innerHTML = \`\${getIcon('safety')} <strong>\${escapeHtml(step.safetyBlock.peerName)}</strong> is editing <code>\${escapeHtml(step.safetyBlock.filePath)}</code>\`;
         safetyEl.appendChild(safetyText);
         container.appendChild(safetyEl);
       }
 
       if (step.diff) {
-        // Count adds/dels for the chip
         let adds = 0, dels = 0;
         for (const hunk of step.diff.hunks || []) {
           for (const line of hunk.lines || []) {
@@ -2143,11 +3061,9 @@ export class ChatPanelProvider
         });
         container.appendChild(chip);
 
-        // Also render inline diff (collapsed)
         const diffEl = createDiffView(step.diff);
         diffEl.style.display = 'none';
         chip.addEventListener('click', () => {
-          // Toggle inline diff (in addition to opening VS Code diff)
           diffEl.style.display = diffEl.style.display === 'none' ? 'block' : 'none';
         });
         container.appendChild(diffEl);
@@ -2192,16 +3108,16 @@ export class ChatPanelProvider
 
       const senderSpan = document.createElement('span');
       senderSpan.className = 'msg-sender';
-      let displayName = '✦ Copilot';
+      let displayName = 'AI PANEL';
       if (isUser) {
         if (state.currentUser && msg.senderId === state.currentUser.id) {
-          displayName = 'You';
+          displayName = state.currentUser.name || 'YOU';
         } else {
           const collaborator = state.snapshot && state.snapshot.collaborators && state.snapshot.collaborators.find(c => c.userId === msg.senderId);
           displayName = collaborator ? collaborator.name : (msg.senderName || (msg.senderId ? msg.senderId.slice(0, 8) : 'Collaborator'));
         }
       }
-      senderSpan.textContent = displayName;
+      senderSpan.textContent = displayName.toUpperCase();
       meta.appendChild(senderSpan);
 
       if (msg.model) {
@@ -2230,7 +3146,6 @@ export class ChatPanelProvider
         renderMarkdownSafe(msg.content, bubble);
       }
 
-      // Show attachment chips for historical user messages (metadata only — no preview)
       if (isUser && msg.attachments && msg.attachments.length > 0) {
         const attachRow = document.createElement('div');
         attachRow.className = 'msg-attachments';
@@ -2244,14 +3159,10 @@ export class ChatPanelProvider
           const ext = att.fileName.toLowerCase().split('.').pop() || '';
           const icon = document.createElement('span');
           icon.className = 'file-chip-icon';
-          if (att.mimeType === 'application/pdf') icon.textContent = '📄';
-          else if (att.mimeType.startsWith('image/')) icon.textContent = '🖼️';
-          else if (['ts','tsx','js','jsx','mjs','json','yaml','yml'].includes(ext)) icon.textContent = '{ }';
-          else if (ext === 'py') icon.textContent = '🐍';
-          else if (['md','txt','rst'].includes(ext)) icon.textContent = '📝';
-          else if (['html','css','scss'].includes(ext)) icon.textContent = '🌐';
-          else if (['sql','graphql'].includes(ext)) icon.textContent = '🗃️';
-          else icon.textContent = '📎';
+          if (att.mimeType === 'application/pdf') icon.innerHTML = getIcon('file');
+          else if (att.mimeType.startsWith('image/')) icon.innerHTML = getIcon('image');
+          else icon.innerHTML = getIcon('file');
+          
           const label = document.createElement('span');
           label.className = 'file-chip-label';
           label.textContent = att.fileName;
@@ -2287,7 +3198,7 @@ export class ChatPanelProvider
         const btnPrivate = document.createElement('button');
         btnPrivate.className = 'fork-btn';
         btnPrivate.title = 'Fork private';
-        btnPrivate.textContent = '⑃ private';
+        btnPrivate.innerHTML = getIcon('gitBranch', 10) + ' private';
         btnPrivate.addEventListener('click', () => {
           post({ type: 'fork', messageId: msg.id, kind: 'private' });
         });
@@ -2296,7 +3207,7 @@ export class ChatPanelProvider
         const btnPublic = document.createElement('button');
         btnPublic.className = 'fork-btn';
         btnPublic.title = 'Fork public';
-        btnPublic.textContent = '⑃ public';
+        btnPublic.innerHTML = getIcon('gitBranch', 10) + ' public';
         btnPublic.addEventListener('click', () => {
           btnPrivate.style.display = 'none';
           btnPublic.style.display = 'none';
@@ -2322,7 +3233,7 @@ export class ChatPanelProvider
 
           const btnConfirm = document.createElement('button');
           btnConfirm.className = 'fork-btn confirm';
-          btnConfirm.textContent = '✓';
+          btnConfirm.innerHTML = getIcon('verify', 10);
           btnConfirm.style.padding = '2px 6px';
           btnConfirm.addEventListener('click', (ev) => {
             ev.stopPropagation();
@@ -2337,7 +3248,7 @@ export class ChatPanelProvider
 
           const btnCancel = document.createElement('button');
           btnCancel.className = 'fork-btn cancel';
-          btnCancel.textContent = '✕';
+          btnCancel.innerHTML = getIcon('x', 10);
           btnCancel.style.padding = '2px 6px';
           btnCancel.addEventListener('click', (ev) => {
             ev.stopPropagation();
@@ -2406,7 +3317,11 @@ export class ChatPanelProvider
         }
       }
 
-      sessionLabel.textContent = labelText;
+      if (labelText.startsWith('●')) {
+        sessionLabel.innerHTML = '<span class="status-dot"></span>' + escapeHtml(labelText.slice(1).trim());
+      } else {
+        sessionLabel.textContent = labelText;
+      }
     };
 
     const updateWarning = () => {
@@ -2434,7 +3349,8 @@ export class ChatPanelProvider
           badge.className = 'pinned-file-badge';
           
           const text = document.createElement('span');
-          text.textContent = \`📎 \${f.split('/').pop()}\`;
+          text.className = 'pinned-file-text';
+          text.innerHTML = getIcon('paperclip', 12) + ' ' + escapeHtml(f.split('/').pop());
           badge.appendChild(text);
 
           const btnRemove = document.createElement('button');
@@ -2468,7 +3384,7 @@ export class ChatPanelProvider
 
       const btnClose = document.createElement('button');
       btnClose.className = 'settings-close';
-      btnClose.textContent = '✕';
+      btnClose.innerHTML = getIcon('x', 14);
       btnClose.addEventListener('click', () => {
         state.showThreads = false;
         drawer.classList.add('hidden');
@@ -2499,9 +3415,14 @@ export class ChatPanelProvider
         const nameSpan = document.createElement('span');
         nameSpan.className = 'thread-name';
         
-        let typeLabel = t.type === 'group' ? '👥' : t.type === 'public-fork' ? '🌿' : t.type === 'private-fork' ? '🔒' : '💬';
-        let label = t.name || (t.type === 'group' ? 'Group Chat' : t.type ? t.type.replace('-', ' ') : 'Local Chat');
-        nameSpan.textContent = typeLabel + ' ' + label;
+        let typeLabel = '';
+        if (t.type === 'group') typeLabel = getIcon('users', 12);
+        else if (t.type === 'public-fork') typeLabel = getIcon('gitBranch', 12);
+        else if (t.type === 'private-fork') typeLabel = getIcon('lock', 12);
+        else typeLabel = getIcon('messageSquare', 12);
+
+        const label = t.name || (t.type === 'group' ? 'Group Chat' : t.type ? t.type.replace('-', ' ') : 'Local Chat');
+        nameSpan.innerHTML = typeLabel + ' ' + escapeHtml(label);
         item.appendChild(nameSpan);
 
         const dateSpan = document.createElement('span');
@@ -2509,11 +3430,10 @@ export class ChatPanelProvider
         dateSpan.textContent = formatTime(t.createdAt);
         item.appendChild(dateSpan);
 
-        // Delete button — group threads cannot be deleted (they're shared)
         const canDelete = t.type !== 'group';
         const btnDelete = document.createElement('button');
         btnDelete.className = 'thread-delete-btn';
-        btnDelete.textContent = '🗑';
+        btnDelete.innerHTML = getIcon('trash', 12);
         btnDelete.title = canDelete ? 'Delete this chat' : 'Group chats cannot be deleted';
         btnDelete.disabled = !canDelete;
         btnDelete.addEventListener('click', (ev) => {
@@ -2521,7 +3441,6 @@ export class ChatPanelProvider
           if (!canDelete) return;
           if (!confirm('Delete this chat thread? This cannot be undone.')) return;
           post({ type: 'deleteThread', threadId: t.id });
-          // Optimistically close drawer
           state.showThreads = false;
           drawer.classList.add('hidden');
           document.getElementById('btn-toggle-threads').classList.remove('active');
@@ -2555,7 +3474,7 @@ export class ChatPanelProvider
 
       const btnClose = document.createElement('button');
       btnClose.className = 'settings-close';
-      btnClose.textContent = '✕';
+      btnClose.innerHTML = getIcon('x', 14);
       btnClose.addEventListener('click', () => {
         state.showSettings = false;
         drawer.classList.add('hidden');
@@ -2581,7 +3500,7 @@ export class ChatPanelProvider
         if (status && status.activeProvider === p.name) {
           badge.classList.add('active');
         }
-        badge.innerHTML = \`\${p.hasKey ? '●' : '○'} \${p.name}\`;
+        badge.innerHTML = \`\${p.hasKey ? '●' : '○'} \${escapeHtml(p.name)}\`;
         
         badge.addEventListener('click', () => {
           post({ type: 'setProvider', provider: p.name });
@@ -2591,7 +3510,7 @@ export class ChatPanelProvider
         if (p.hasKey) {
           const statusText = document.createElement('span');
           statusText.className = 'provider-status-text';
-          statusText.textContent = '✓ connected';
+          statusText.textContent = 'connected';
           pHeader.appendChild(statusText);
         }
 
@@ -2617,10 +3536,10 @@ export class ChatPanelProvider
           btnSave.id = \`btn-save-\${p.name}\`;
           
           if (state.saved[p.name]) {
-            btnSave.textContent = '✓';
+            btnSave.textContent = 'Saved';
             btnSave.classList.add('saved');
           } else if (state.validating[p.name]) {
-            btnSave.textContent = '…';
+            btnSave.textContent = '...';
           } else {
             btnSave.textContent = 'Save';
           }
@@ -2709,7 +3628,7 @@ export class ChatPanelProvider
 
         const icon = document.createElement('div');
         icon.className = 'empty-icon';
-        icon.textContent = '✦';
+        icon.innerHTML = getIcon('star', 24);
         empty.appendChild(icon);
 
         const text = document.createElement('p');
@@ -2772,44 +3691,40 @@ export class ChatPanelProvider
       const pausedBanner = document.getElementById('paused-banner');
       const btnAttach = document.getElementById('btn-attach');
 
-      // Attach button — always visible; tooltip reflects vision capability
       if (btnAttach) {
         btnAttach.style.display = 'flex';
         btnAttach.classList.toggle('has-images', state.pendingImages.length > 0);
         btnAttach.title = state.visionSupported
           ? 'Attach image, PDF, or text file'
-          : 'Attach PDF or text file (images need a vision-capable model)';
+          : 'Attach PDF or text file';
       }
 
-      // Paused banner
       if (pausedBanner) {
         pausedBanner.style.display = state.agentPaused ? 'flex' : 'none';
       }
 
       if (state.streamingId) {
         btnSend.disabled = false;
-        // If agent is running (not ask mode streaming), show pause too
         if (state.mode === 'agent' && !state.agentPaused) {
           btnPause.classList.remove('hidden');
-          btnSend.textContent = '⬛';
+          btnSend.innerHTML = getIcon('stop', 16);
           btnSend.classList.add('stop');
           btnSend.title = 'Stop agent';
         } else if (state.agentPaused) {
           btnPause.classList.add('hidden');
-          btnSend.textContent = '▶';
+          btnSend.innerHTML = getIcon('play', 16);
           btnSend.classList.remove('stop');
           btnSend.title = 'Send follow-up / resume';
           btnSend.disabled = !state.input.trim();
         } else {
-          // Ask mode streaming
           btnPause.classList.add('hidden');
-          btnSend.textContent = '⬛';
+          btnSend.innerHTML = getIcon('stop', 16);
           btnSend.classList.add('stop');
           btnSend.title = 'Stop streaming';
         }
       } else {
         btnPause.classList.add('hidden');
-        btnSend.textContent = '↑';
+        btnSend.innerHTML = getIcon('send', 16);
         btnSend.classList.remove('stop');
         btnSend.title = 'Send message';
         const text = state.input.trim();
@@ -2828,7 +3743,7 @@ export class ChatPanelProvider
         textarea.placeholder = \`AI is responding to \${state.cooldownUserName || 'another user'}...\`;
       } else {
         textarea.placeholder = state.mode === 'agent' 
-          ? 'Describe a task… (Agent will plan + edit)' 
+          ? 'Describe a task…' 
           : 'Ask about your codebase…';
       }
     };
@@ -2837,7 +3752,6 @@ export class ChatPanelProvider
       const textarea = document.getElementById('chat-input');
       const text = textarea.value.trim();
 
-      // If agent is paused, send as resume
       if (state.agentPaused) {
         if (!text) return;
         post({ type: 'resumeAgent', content: text });
@@ -2850,7 +3764,6 @@ export class ChatPanelProvider
 
       if (!text && state.pendingImages.length === 0) return;
       if (!state.activeThreadId) return;
-      // Block new sends while streaming, UNLESS agent is paused (resume path)
       if (state.streamingId && !state.agentPaused) return;
 
       post({
@@ -2873,7 +3786,6 @@ export class ChatPanelProvider
     const fileToBase64 = (file) => new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
-        // result is data:mime;base64,XXX — strip the prefix
         const result = reader.result;
         resolve(result.split(',')[1]);
       };
@@ -2901,24 +3813,14 @@ export class ChatPanelProvider
         chip.className = 'attachment-chip';
         const getExt = (name) => { if (!name) return ''; const p = name.toLowerCase().split('.'); return p.length > 1 ? p[p.length-1] : ''; };
         const isRealImage = (mimeType, fileName) => { const ext = getExt(fileName); if (ext === 'ts' || ext === 'tsx') return false; return mimeType.startsWith('image/'); };
-        const getIcon = (mimeType, fileName) => {
+        const getFileIcon = (mimeType, fileName) => {
           const ext = getExt(fileName);
-          if (mimeType === 'application/pdf') return '📄';
-          if (isRealImage(mimeType, fileName)) return '🖼️';
-          if (['ts','tsx','js','jsx','mjs','json','jsonc','yaml','yml','toml'].includes(ext)) return '{ }';
-          if (ext === 'py') return '🐍';
-          if (['md','mdx','txt','rst','docx','doc'].includes(ext)) return '📝';
-          if (['html','htm','css','scss'].includes(ext)) return '🌐';
-          if (['sql','graphql','gql'].includes(ext)) return '🗃️';
-          if (['sh','bash','zsh','ps1','bat'].includes(ext)) return '⚙️';
-          if (['csv','tsv','xlsx','xls'].includes(ext)) return '📊';
-          if (['zip','tar','gz','rar','7z'].includes(ext)) return '🗜️';
-          if (mimeType.startsWith('text/')) return '📝';
-          return '📎';
+          if (mimeType === 'application/pdf') return getIcon('file');
+          if (isRealImage(mimeType, fileName)) return getIcon('image');
+          return getIcon('file');
         };
         const isImage = isRealImage(img.mimeType, img.fileName);
         if (isImage) {
-          // Show thumbnail for actual images
           const image = document.createElement('img');
           image.src = \`data:\${img.mimeType};base64,\${img.data}\`;
           image.alt = img.fileName || 'image';
@@ -2928,7 +3830,7 @@ export class ChatPanelProvider
             fallback.className = 'file-chip-inner';
             const icon = document.createElement('span');
             icon.className = 'file-chip-icon';
-            icon.textContent = '🖼️';
+            icon.innerHTML = getIcon('image');
             const label = document.createElement('span');
             label.className = 'file-chip-label';
             label.textContent = img.fileName || 'image';
@@ -2939,12 +3841,11 @@ export class ChatPanelProvider
           };
           chip.appendChild(image);
         } else {
-          // File chip for PDFs, text files, code, and other non-image types
           const inner = document.createElement('div');
           inner.className = 'file-chip-inner';
           const icon = document.createElement('span');
           icon.className = 'file-chip-icon';
-          icon.textContent = getIcon(img.mimeType, img.fileName);
+          icon.innerHTML = getFileIcon(img.mimeType, img.fileName);
           const label = document.createElement('span');
           label.className = 'file-chip-label';
           const displayName = img.fileName || img.mimeType;
@@ -2965,7 +3866,7 @@ export class ChatPanelProvider
         }
         const removeBtn = document.createElement('button');
         removeBtn.className = 'remove-img';
-        removeBtn.textContent = '×';
+        removeBtn.innerHTML = getIcon('x', 10);
         removeBtn.title = 'Remove';
         removeBtn.addEventListener('click', () => {
           state.pendingImages.splice(idx, 1);
@@ -3043,12 +3944,10 @@ export class ChatPanelProvider
         if (state.agentPaused) {
           sendMessage();
         } else if (state.streamingId && state.mode === 'agent') {
-          // Agent running — abort cleanly (handles both running and paused states)
           post({ type: 'abortAgent' });
           state.agentPaused = false;
           updateInputArea();
         } else if (state.streamingId) {
-          // Ask mode streaming
           post({ type: 'stopStream' });
         } else {
           sendMessage();
@@ -3057,19 +3956,16 @@ export class ChatPanelProvider
 
       document.getElementById('btn-pause').addEventListener('click', () => {
         post({ type: 'pauseAgent' });
-        // Optimistically update UI immediately — don't wait for backend ack
         state.agentPaused = true;
         updateInputArea();
       });
 
       document.getElementById('btn-abort-agent').addEventListener('click', () => {
-        // Abort immediately — no LLM round-trip needed
         post({ type: 'abortAgent' });
         state.agentPaused = false;
         updateInputArea();
       });
 
-      // Attachment: file input trigger
       document.getElementById('btn-attach').addEventListener('click', () => {
         document.getElementById('file-input').click();
       });
@@ -3077,14 +3973,14 @@ export class ChatPanelProvider
       document.getElementById('file-input').addEventListener('change', async (e) => {
         const files = e.target.files;
         if (!files || files.length === 0) return;
-        const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+        const MAX_FILE_SIZE = 10 * 1024 * 1024;
         for (const file of files) {
           if (file.size > MAX_FILE_SIZE) {
             const preview = document.getElementById('attachment-preview');
             preview.style.display = 'flex';
             const err = document.createElement('span');
             err.style.cssText = 'font-size:11px;color:var(--error,#f44);padding:4px 6px;';
-            err.textContent = \`⚠ \${file.name}: too large (max 10 MB)\`;
+            err.textContent = \`\${file.name}: too large (max 10 MB)\`;
             preview.appendChild(err);
             setTimeout(() => { err.remove(); if (state.pendingImages.length === 0) preview.style.display = 'none'; }, 4000);
             continue;
@@ -3102,11 +3998,10 @@ export class ChatPanelProvider
         updateInputArea();
       });
 
-      // Paste image or file from clipboard
       document.getElementById('chat-input').addEventListener('paste', async (e) => {
         const items = e.clipboardData && e.clipboardData.items;
         if (!items) return;
-        const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+        const MAX_FILE_SIZE = 10 * 1024 * 1024;
         for (const item of items) {
           if (item.kind === 'file') {
             e.preventDefault();
@@ -3117,7 +4012,7 @@ export class ChatPanelProvider
               preview.style.display = 'flex';
               const err = document.createElement('span');
               err.style.cssText = 'font-size:11px;color:var(--error,#f44);padding:4px 6px;';
-              err.textContent = \`⚠ Pasted file too large (max 10 MB)\`;
+              err.textContent = \`Pasted file too large (max 10 MB)\`;
               preview.appendChild(err);
               setTimeout(() => { err.remove(); if (state.pendingImages.length === 0) preview.style.display = 'none'; }, 4000);
               continue;
@@ -3136,7 +4031,6 @@ export class ChatPanelProvider
         }
       });
 
-      // Drag-and-drop: files dragged onto the chat panel
       const chatContainer = document.getElementById('chat-container') || document.body;
       const dropOverlay = document.getElementById('chat-drop-overlay');
 
@@ -3153,7 +4047,6 @@ export class ChatPanelProvider
         }
       });
       document.addEventListener('dragleave', (e) => {
-        // Only hide overlay when leaving the window entirely
         if (!e.relatedTarget) {
           if (dropOverlay) dropOverlay.classList.remove('active');
         }
@@ -3170,7 +4063,7 @@ export class ChatPanelProvider
             preview.style.display = 'flex';
             const err = document.createElement('span');
             err.style.cssText = 'font-size:11px;color:var(--error,#f44);padding:4px 6px;';
-            err.textContent = \`\u26A0 \${file.name}: too large (max 10 MB)\`;
+            err.textContent = \`\${file.name}: too large (max 10 MB)\`;
             preview.appendChild(err);
             setTimeout(() => { err.remove(); if (state.pendingImages.length === 0) preview.style.display = 'none'; }, 4000);
             continue;
@@ -3272,7 +4165,7 @@ export class ChatPanelProvider
         case 'messageAdded':
           state.messages.push(msg.message);
           if (msg.message.role === 'assistant' &&
-              (msg.message.content === '' || msg.message.content === '🤖 Agent starting…')) {
+              (msg.message.content === '' || msg.message.content === 'Agent starting…')) {
             state.streamingId = msg.message.id;
           }
           updateChatHistory();
@@ -3387,7 +4280,7 @@ export class ChatPanelProvider
             id: Date.now().toString(),
             threadId: state.activeThreadId || 'unknown',
             role: 'assistant',
-            content: '❌ ' + msg.message,
+            content: 'Error: ' + msg.message,
             model: undefined,
             tokensUsed: undefined,
             contextRefs: undefined,
